@@ -22,6 +22,10 @@ G.GAME.chips                                     # 56
 
 It needs only the Python standard library (3.12+).
 
+Full documentation is in [`docs/`](docs/README.md): getting started, the game
+flow, the API reference, the state reference, front-end hooks, internals and
+verification.
+
 ## Install
 
 ```
@@ -99,7 +103,7 @@ them changes the run.
   | `hand` | `handname`, `level`, `chips`, `mult`, `chip_total` (only those that change) | the scoring panel |
   | `card_text` | `card`, `effect` (`chips`, `mult`, `x_mult`, `dollars`, `again`, `debuffed`, `swap`, `message`), `amount`, `message`, `held`, `edition` | a pop-up over a card |
   | `hand_scored` | `hand`, `chips`, `mult`, `score`, `round_score` | the hand's total |
-  | `round_score` | `chips` | the round score set (to 0 when a blind starts) |
+  | `round_score` | `chips` | the round score set (back to 0 at cash out) |
   | `dollars` | `amount`, `total` | money changing |
   | `status_text` | `text` | text over the play area ("Not Allowed!") |
   | `card_moved` | `card`, `to` (area name) | a card arriving in an area |
