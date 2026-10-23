@@ -10,9 +10,11 @@ from .lua import T, copy_table
 if TYPE_CHECKING:
     from .game import Game
 
+PLACEHOLDER_HAND = "[Poker Hand]"
+
 
 class Tag:
-    def __init__(self, G: "Game", key: str, for_collection: bool = False, blind_type: str | None = None) -> None:
+    def __init__(self, G: "Game", key: str, for_collection: Any = None, blind_type: str | None = None) -> None:
         self.G = G
         self.key = key
         proto = G.P_TAGS[key]
@@ -20,15 +22,30 @@ class Tag:
         self.name = proto.name
         self.tally = G.GAME.tag_tally or 0
         self.triggered = False
-        G.tagid += 1
         self.ID = G.tagid
-        self.ability = T(orbital_hand="[Poker Hand]", blind_type=blind_type)
-        G.GAME.tag_tally = (G.GAME.tag_tally + 1) if G.GAME.tag_tally else 1
+        G.tagid = G.tagid + 1
+        self.ability = T(orbital_hand=PLACEHOLDER_HAND, blind_type=blind_type)
+        G.GAME.tag_tally = (G.GAME.tag_tally + 1) if G.GAME.tag_tally is not None else 1
         if not for_collection:
             self.set_ability()
 
     def __repr__(self) -> str:
-        return f"<Tag {self.key}>"
+        return f"<Tag {self.key}#{self.ID}>"
+
+    # ------------------------------------------------------------ animation
+    def nope(self) -> None:
+        G = self.G
+        G.ev(None, delay=0.2, trigger="after")
+        G.ev(None, trigger="after", delay=0.1)
+        G.ev(self.remove, trigger="after", delay=0.5)
+
+    def yep(self, message: str, colour: Any, func: Any) -> None:
+        G = self.G
+        G.stop_use()
+        G.ev(None, delay=0.4, trigger="after")
+        G.ev(None)
+        G.event(func)
+        G.ev(self.remove, trigger="after", delay=0.7)
 
     def set_ability(self) -> None:
         G = self.G
@@ -37,196 +54,251 @@ class Tag:
                 self.ability.orbital_hand = G.orbital_hand
             elif self.ability.blind_type:
                 oc = G.GAME.orbital_choices
-                if oc and oc.get(G.GAME.round_resets.ante) and oc[G.GAME.round_resets.ante].get(self.ability.blind_type):
+                if oc and oc[G.GAME.round_resets.ante][self.ability.blind_type]:
                     self.ability.orbital_hand = oc[G.GAME.round_resets.ante][self.ability.blind_type]
 
-    def remove(self) -> None:
+    # ----------------------------------------------------------- the effect
+    def apply_to_run(self, ctx: T) -> Any:
         G = self.G
-        try:
-            G.GAME.tags.remove(self)
-        except ValueError:
-            pass
-
-    def _yep(self, func: Any = None) -> None:
-        """Tag:yep(): the tag's effect runs in an event, then the tag is removed."""
-        G = self.G
-        if func is not None:
-            G.add_event(func)
-        G.add_event(self.remove)
-
-    def _nope(self) -> None:
-        self.G.add_event(self.remove)
-
-    def apply_to_run(self, context: T) -> Any:
-        G = self.G
-        if self.triggered or self.config.type != context.type:
+        GAME = G.GAME
+        if self.triggered or self.config.type != ctx.type:
             return None
-        t = context.type
         name = self.name
-        if t == "eval":
-            if name == "Investment Tag" and G.GAME.last_blind and G.GAME.last_blind.boss:
-                self._yep()
+        typ = ctx.type
+        locks = G.CONTROLLER.locks
+        if typ == "eval":
+            if name == "Investment Tag" and GAME.last_blind and GAME.last_blind.boss:
+                self.yep("+", None, lambda: True)
                 self.triggered = True
-                return T(dollars=self.config.dollars, condition="Defeat the Boss", tag=self)
-        elif t == "immediate":
+                return T(dollars=self.config.dollars, tag=self)
+        elif typ == "immediate":
+            lock = self.ID
+            locks[lock] = True
+
+            def unlock() -> bool:
+                locks[lock] = None
+                return True
             if name == "Top-up Tag":
-                def topup() -> None:
+                def topup() -> bool:
                     for _ in range(self.config.spawn_jokers):
                         if G.jokers is not None and len(G.jokers.cards) < G.jokers.config.card_limit:
                             card = G.create_card("Joker", G.jokers, None, 0, None, None, None, "top")
                             card.add_to_deck()
                             G.jokers.emplace(card)
-                self._yep(topup)
+                    locks[lock] = None
+                    return True
+                self.yep("+", None, topup)
                 self.triggered = True
                 return True
             if name == "Skip Tag":
-                self._yep()
-                G.ease_dollars((G.GAME.skips or 0) * self.config.skip_bonus)
+                self.yep("+", None, unlock)
+                G.ease_dollars((GAME.skips or 0) * self.config.skip_bonus)
                 self.triggered = True
                 return True
             if name == "Garbage Tag":
-                self._yep()
-                G.ease_dollars((G.GAME.unused_discards or 0) * self.config.dollars_per_discard)
+                self.yep("+", None, unlock)
+                G.ease_dollars((GAME.unused_discards or 0) * self.config.dollars_per_discard)
                 self.triggered = True
                 return True
             if name == "Handy Tag":
-                self._yep()
-                G.ease_dollars((G.GAME.hands_played or 0) * self.config.dollars_per_hand)
+                self.yep("+", None, unlock)
+                G.ease_dollars((GAME.hands_played or 0) * self.config.dollars_per_hand)
                 self.triggered = True
                 return True
             if name == "Economy Tag":
-                self._yep()
-                G.add_event(lambda: G.ease_dollars(min(self.config.max, max(0, G.GAME.dollars)), True))
+                self.yep("+", None, unlock)
+
+                def econ() -> None:
+                    G.ease_dollars(min(self.config.max, max(0, GAME.dollars)), True)
+                G.ev(econ)
                 self.triggered = True
                 return True
             if name == "Orbital Tag":
-                G.level_up_hand(self, self.ability.orbital_hand, None, self.config.levels)
-                self._yep()
+                hand = self.ability.orbital_hand
+                h = GAME.hands[hand]
+                G.update_hand_text(T(sound="button", volume=0.7, pitch=0.8, delay=0.3),
+                                   T(handname=hand, chips=h.chips, mult=h.mult, level=h.level))
+                G.level_up_hand(self, hand, None, self.config.levels)
+                G.update_hand_text(T(sound="button", volume=0.7, pitch=1.1, delay=0),
+                                   T(mult=0, chips=0, handname="", level=""))
+                self.yep("+", None, unlock)
                 self.triggered = True
                 return True
-        elif t == "new_blind_choice":
-            pack = None
-            if name == "Charm Tag":
-                pack = "p_arcana_mega_1"  # _1/_2 picked with global math.random: art only
-            elif name == "Meteor Tag":
-                pack = "p_celestial_mega_1"
-            elif name == "Ethereal Tag":
-                pack = "p_spectral_normal_1"
-            elif name == "Standard Tag":
-                pack = "p_standard_mega_1"
-            elif name == "Buffoon Tag":
-                pack = "p_buffoon_mega_1"
-            if pack is not None:
-                def open_pack(pack: str = pack) -> None:
-                    card = Card(G, None, G.P_CENTERS[pack], {"bypass_discovery_center": True})
+        elif typ == "new_blind_choice":
+            lock = self.ID
+            locks[lock] = True
+            packs = {"Charm Tag": "p_arcana_mega_1", "Meteor Tag": "p_celestial_mega_1",
+                     "Ethereal Tag": "p_spectral_normal_1", "Standard Tag": "p_standard_mega_1",
+                     "Buffoon Tag": "p_buffoon_mega_1"}
+            if name in packs:
+                # Charm/Meteor pick the artwork variant (_1/_2) with math.random
+                # on LuaJIT's global state; both packs are identical
+                key = packs[name]
+
+                def open_pack() -> bool:
+                    card = Card(G, G.P_CARDS.get("empty"), G.P_CENTERS[key],
+                                {"bypass_discovery_center": True, "bypass_discovery_ui": True})
                     card.cost = 0
                     card.from_tag = True
                     G.use_card(card)
-                self._yep(open_pack)
+                    card.start_materialize()
+                    locks[lock] = None
+                    return True
+                self.yep("+", None, open_pack)
                 self.triggered = True
                 return True
             if name == "Boss Tag":
-                def reroll() -> None:
+                locks[lock] = True
+
+                def boss() -> bool:
                     G.from_boss_tag = True
                     G.reroll_boss()
-                self._yep(reroll)
+
+                    def l1() -> bool:
+                        def l2() -> bool:
+                            locks[lock] = None
+                            return True
+                        G.event(l2)
+                        return True
+                    G.event(l1)
+                    return True
+                self.yep("+", None, boss)
                 self.triggered = True
                 return True
-        elif t == "voucher_add":
+        elif typ == "voucher_add":
             if name == "Voucher Tag":
-                def add_voucher() -> None:
+                def voucher() -> bool:
                     G.ARGS.voucher_tag = G.ARGS.voucher_tag or T()
-                    voucher_key = G.get_next_voucher_key(True)
-                    G.ARGS.voucher_tag[voucher_key] = True
-                    G.shop_vouchers.config.card_limit += 1
-                    card = Card(G, None, G.P_CENTERS[voucher_key], {"bypass_discovery_center": True})
+                    vkey = G.get_next_voucher_key(True)
+                    G.ARGS.voucher_tag[vkey] = True
+                    G.shop_vouchers.config.card_limit = G.shop_vouchers.config.card_limit + 1
+                    card = Card(G, G.P_CARDS.get("empty"), G.P_CENTERS[vkey],
+                                {"bypass_discovery_center": True, "bypass_discovery_ui": True})
+                    G.create_shop_card_ui(card, "Voucher", G.shop_vouchers)
+                    card.start_materialize()
                     G.shop_vouchers.emplace(card)
                     G.ARGS.voucher_tag = None
-                self._yep(add_voucher)
+                    return True
+                self.yep("+", None, voucher)
                 self.triggered = True
-        elif t == "tag_add":
-            if name == "Double Tag" and context.tag.key != "tag_double":
-                def double() -> None:
-                    if context.tag.ability and context.tag.ability.orbital_hand:
-                        G.orbital_hand = context.tag.ability.orbital_hand
-                    G.add_tag(Tag(G, context.tag.key))
+        elif typ == "tag_add":
+            if name == "Double Tag" and ctx.tag.key != "tag_double":
+                lock = self.ID
+                locks[lock] = True
+                other = ctx.tag
+
+                def double() -> bool:
+                    if other.ability and other.ability.orbital_hand:
+                        G.orbital_hand = other.ability.orbital_hand
+                    G.add_tag(Tag(G, other.key))
                     G.orbital_hand = None
-                self._yep(double)
+                    locks[lock] = None
+                    return True
+                self.yep("+", None, double)
                 self.triggered = True
-        elif t == "round_start_bonus":
+        elif typ == "round_start_bonus":
             if name == "Juggle Tag":
-                self._yep()
+                self.yep("+", None, lambda: True)
                 G.hand.change_size(self.config.h_size)
-                G.GAME.round_resets.temp_handsize = (G.GAME.round_resets.temp_handsize or 0) + self.config.h_size
+                GAME.round_resets.temp_handsize = (GAME.round_resets.temp_handsize or 0) + self.config.h_size
                 self.triggered = True
                 return True
-        elif t == "store_joker_create":
+        elif typ == "store_joker_create":
             card = None
             if name == "Rare Tag":
-                rares = set()
+                rares = {}
+                count = 0
                 for v in G.jokers.cards:
-                    if v.config.center.rarity == 3:
-                        rares.add(v.config.center.key)
-                if len(G.P_JOKER_RARITY_POOLS[2]) > len(rares):
-                    card = G.create_card("Joker", context.area, None, 1, None, None, None, "rta")
-
-                    def coupon(card: Card = card) -> None:
-                        card.ability.couponed = True
-                        card.set_cost()
-                    self._yep(coupon)
+                    if v.config.center.rarity == 3 and v.config.center.key not in rares:
+                        count += 1
+                        rares[v.config.center.key] = True
+                if len(G.P_JOKER_RARITY_POOLS[2]) > count:
+                    card = G.create_card("Joker", ctx.area, None, 1, None, None, None, "rta")
+                    G.create_shop_card_ui(card, "Joker", ctx.area)
+                    self.yep("+", None, self._coupon(card))
                 else:
-                    self._nope()
+                    self.nope()
                 self.triggered = True
             elif name == "Uncommon Tag":
-                card = G.create_card("Joker", context.area, None, 0.9, None, None, None, "uta")
-
-                def coupon2(card: Card = card) -> None:
-                    card.ability.couponed = True
-                    card.set_cost()
-                self._yep(coupon2)
+                card = G.create_card("Joker", ctx.area, None, 0.9, None, None, None, "uta")
+                G.create_shop_card_ui(card, "Joker", ctx.area)
+                self.yep("+", None, self._coupon(card))
             self.triggered = True
             return card
-        elif t == "shop_start":
-            if name == "D6 Tag" and not G.GAME.shop_d6ed:
-                G.GAME.shop_d6ed = True
+        elif typ == "shop_start":
+            if name == "D6 Tag" and not GAME.shop_d6ed:
+                GAME.shop_d6ed = True
 
-                def d6() -> None:
-                    G.GAME.round_resets.temp_reroll_cost = 0
+                def d6() -> bool:
+                    GAME.round_resets.temp_reroll_cost = 0
                     G.calculate_reroll_cost(True)
-                self._yep(d6)
+                    return True
+                self.yep("+", None, d6)
                 self.triggered = True
                 return True
-        elif t == "store_joker_modify":
+        elif typ == "store_joker_modify":
             applied = None
-            card = context.card
+            card = ctx.card
             if not card.edition and not card.temp_edition and card.ability.set == "Joker":
-                ed = {"Foil Tag": "foil", "Holographic Tag": "holo", "Polychrome Tag": "polychrome",
-                      "Negative Tag": "negative"}.get(name)
-                if ed is not None:
+                lock = self.ID
+                locks[lock] = True
+                editions = {"Foil Tag": "foil", "Holographic Tag": "holo", "Polychrome Tag": "polychrome",
+                            "Negative Tag": "negative"}
+                if name in editions:
+                    ed = editions[name]
                     card.temp_edition = True
 
-                    def apply_ed(card: Card = card, ed: str = ed) -> None:
+                    def apply() -> bool:
                         card.temp_edition = None
                         card.set_edition(T({ed: True}), True)
                         card.ability.couponed = True
                         card.set_cost()
-                    self._yep(apply_ed)
+                        locks[lock] = None
+                        return True
+                    self.yep("+", None, apply)
                     applied = True
                 self.triggered = True
             return applied
-        elif t == "shop_final_pass":
-            if name == "Coupon Tag" and (G.shop is not None and not G.GAME.shop_free):
-                G.GAME.shop_free = True
+        elif typ == "shop_final_pass":
+            if name == "Coupon Tag" and (G.shop is not None and not GAME.shop_free):
+                GAME.shop_free = True
 
-                def free() -> None:
+                def coupon() -> bool:
                     if G.shop_jokers is not None and G.shop_booster is not None:
-                        for v in G.shop_jokers.cards:
+                        for v in list(G.shop_jokers.cards):
                             v.ability.couponed = True
                             v.set_cost()
-                        for v in G.shop_booster.cards:
+                        for v in list(G.shop_booster.cards):
                             v.ability.couponed = True
                             v.set_cost()
-                self._yep(free)
+                    return True
+                self.yep("+", None, coupon)
                 self.triggered = True
                 return True
         return None
+
+    @staticmethod
+    def _coupon(card: Card) -> Any:
+        def f() -> bool:
+            card.start_materialize()
+            card.ability.couponed = True
+            card.set_cost()
+            return True
+        return f
+
+    # ---------------------------------------------------------------- removal
+    def remove_from_game(self) -> None:
+        tags = self.G.GAME.tags
+        key = None
+        for i, v in enumerate(tags):
+            if v is self:
+                key = i
+        if key is None:
+            # table.remove(t, nil) removes the last element
+            if tags:
+                tags.pop()
+        else:
+            del tags[key]
+
+    def remove(self) -> None:
+        self.remove_from_game()

@@ -1,4 +1,8 @@
-"""Port of cardarea.lua (logic only; card order == on-screen left-to-right order)."""
+"""Port of cardarea.lua (game logic only).
+
+Cards are kept in their on-screen left-to-right order, which is what the
+game's ``align_cards`` (sorting by x position every frame) maintains.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +34,7 @@ class CardArea:
         return f"<CardArea {self.name} {self.cards}>"
 
     # ----------------------------------------------------------------- core
-    def emplace(self, card: "Card", location: str | None = None, stay_flipped: bool | None = None) -> None:
+    def emplace(self, card: "Card", location: str | None = None, stay_flipped: Any = None) -> None:
         G = self.G
         if location == "front" or self.config.type == "deck":
             self.cards.insert(0, card)
@@ -44,15 +48,11 @@ class CardArea:
             if self is G.deck:
                 self.config.card_limit = len(self.cards)
         card.area = self
-        if self.config.type in ("deck", "discard") and card.facing == "front":
-            card.flip()  # align_cards() keeps deck/discard cards face down
+        self.align_cards()
         if self is G.jokers:
-            joker_tally = sum(1 for c in self.cards if c.ability.set == "Joker")
-            if joker_tally > G.GAME.max_jokers:
-                G.GAME.max_jokers = joker_tally
-        if self.config.type in ("hand", "joker", "consumeable", "title_2"):
-            # align_cards keeps these ordered by x position == list order
-            pass
+            tally = sum(1 for c in self.cards if c.ability.set == "Joker")
+            if tally > G.GAME.max_jokers:
+                G.GAME.max_jokers = tally
 
     def remove_card(self, card: "Card | None" = None, discarded_only: bool = False) -> "Card | None":
         if self.removed:
@@ -60,13 +60,10 @@ class CardArea:
         cards = self.cards
         if discarded_only:
             cards = [v for v in self.cards if v.ability and v.ability.discarded]
-        if card is None:
-            if not cards:
-                return None
-            if self.config.type in ("discard", "deck"):
-                card = cards[-1]
-            else:
-                card = cards[0]
+        if self.config.type in ("discard", "deck"):
+            card = card or (cards[-1] if cards else None)
+        else:
+            card = card or (cards[0] if cards else None)
         for i in range(len(self.cards) - 1, -1, -1):
             if self.cards[i] is card:
                 card.area = None
@@ -85,36 +82,55 @@ class CardArea:
             self.config.real_card_limit = real + delta
             self.config.card_limit = max(0, self.config.real_card_limit)
             if (delta > 0 and self.config.real_card_limit > 1 and self is G.hand and self.cards
-                    and G.STATE in (G.STATES.DRAW_TO_HAND, G.STATES.SELECTING_HAND)):
+                    and (G.STATE == G.STATES.DRAW_TO_HAND or G.STATE == G.STATES.SELECTING_HAND)):
                 for _ in range(abs(delta)):
-                    G.draw_card(G.deck, G.hand)
-                    G.add_event(lambda: self.sort())
-        G.add_event(ev)
+                    G.draw_card(G.deck, G.hand, None, None, None, None, 0.07)
+                    G.ev(self.sort)
+        G.ev(ev)
 
     # ------------------------------------------------------------ highlight
-    def can_highlight(self, card: "Card") -> bool:
-        return self.config.type in ("hand", "joker", "consumeable") or (
-            self.config.type == "shop" and self.config.highlighted_limit > 0)
-
-    def add_to_highlighted(self, card: "Card", silent: bool = False) -> None:
-        if self.config.type == "shop":
+    def add_to_highlighted(self, card: "Card", silent: Any = None) -> None:
+        G = self.G
+        t = self.config.type
+        if t == "shop":
             if self.highlighted:
                 self.remove_from_highlighted(self.highlighted[0])
             self.highlighted.append(card)
-            card.highlighted = True
-        elif self.config.type in ("joker", "consumeable"):
+            card.highlight(True)
+        elif t in ("joker", "consumeable"):
             if len(self.highlighted) >= self.config.highlighted_limit:
                 self.remove_from_highlighted(self.highlighted[0])
             self.highlighted.append(card)
-            card.highlighted = True
+            card.highlight(True)
         else:
             if len(self.highlighted) >= self.config.highlighted_limit:
-                card.highlighted = False
+                card.highlight(False)
             else:
                 self.highlighted.append(card)
-                card.highlighted = True
+                card.highlight(True)
+            if self is G.hand and G.STATE == G.STATES.SELECTING_HAND:
+                self.parse_highlighted()
 
-    def remove_from_highlighted(self, card: "Card", force: bool = False) -> None:
+    def parse_highlighted(self) -> None:
+        """Previews the hand: queues the hand-text update (an event, and the
+        hand name it shows decides a delay in evaluate_play) and lets the
+        blind set its 'triggered' flag."""
+        G = self.G
+        G.boss_throw_hand = None
+        text, disp_text, poker_hands, _s, _n = G.get_poker_hand_info(self.highlighted)
+        if text == "NULL":
+            G.update_hand_text(T(immediate=True, nopulse=True, delay=0), T(mult=0, chips=0, level="", handname=""))
+        else:
+            if G.GAME.blind and G.GAME.blind.debuff_hand(self.highlighted, poker_hands, text, True):
+                G.boss_throw_hand = True
+            if any(v.facing == "back" for v in self.highlighted):
+                G.update_hand_text(T(immediate=True, delay=0), T(handname="????", level="?", mult="?", chips="?"))
+            else:
+                h = G.GAME.hands[text]
+                G.update_hand_text(T(immediate=True, delay=0),
+                                   T(handname=disp_text, level=h.level, mult=h.mult, chips=h.chips))
+
+    def remove_from_highlighted(self, card: "Card", force: Any = None) -> None:
         G = self.G
         if not force and card is not None and card.ability.forced_selection and self is G.hand:
             return
@@ -122,8 +138,9 @@ class CardArea:
             if self.highlighted[i] is card:
                 del self.highlighted[i]
                 break
-        if card is not None:
-            card.highlighted = False
+        card.highlight(False)
+        if self is G.hand and G.STATE == G.STATES.SELECTING_HAND:
+            self.parse_highlighted()
 
     def unhighlight_all(self) -> None:
         G = self.G
@@ -131,8 +148,10 @@ class CardArea:
             c = self.highlighted[i]
             if c.ability.forced_selection and self is G.hand:
                 continue
-            c.highlighted = False
+            c.highlight(False)
             del self.highlighted[i]
+        if self is G.hand and G.STATE == G.STATES.SELECTING_HAND:
+            self.parse_highlighted()
 
     # ---------------------------------------------------------- order / rng
     def index(self, card: "Card") -> int:
@@ -141,17 +160,31 @@ class CardArea:
                 return i
         return -1
 
+    def align_cards(self) -> None:
+        """The logic in align_cards: deck and discard cards lie face down,
+        and of the re-sorts by x position only the joker area's 'pinned
+        first' rule can change an order."""
+        t = self.config.type
+        if t == "deck" or t == "discard":
+            for c in self.cards:
+                if c.facing == "front":
+                    c.flip()
+        elif t == "joker" and any(c.pinned for c in self.cards):
+            order = {id(c): i for i, c in enumerate(self.cards)}
+            self.cards.sort(key=lambda c: (0, -c.sort_id) if c.pinned else (1, order[id(c)]))
+
     def shuffle(self, seed: str | None = None) -> None:
         G = self.G
-        self.cards.sort(key=lambda c: c.sort_id)
-        G.rng.shuffle(self.cards, G.rng.pseudoseed(seed or "shuffle"))
+        cards = self.cards
+        if cards and cards[0].sort_id is not None:
+            cards.sort(key=lambda c: c.sort_id)
+        G.rng.shuffle(cards, G.rng.pseudoseed(seed or "shuffle"))
 
     def sort(self, method: str | None = None) -> None:
         self.config.sort = method or self.config.sort
         m = self.config.sort
-        # Lua's table.sort with a strict comparator; keys are all distinct
-        # (get_nominal includes the per-card unique_val), so Python's stable
-        # sort gives the same result.
+        # keys are distinct (get_nominal includes the per-card unique_val), so
+        # Python's sort matches Lua's table.sort
         if m == "desc":
             self.cards.sort(key=lambda c: c.get_nominal(), reverse=True)
         elif m == "asc":
@@ -161,25 +194,46 @@ class CardArea:
         elif m == "suit asc":
             self.cards.sort(key=lambda c: c.get_nominal("suit"))
         elif m == "order":
-            self.cards.sort(key=lambda c: (c.config.card.order if c.config.card and c.config.card.order is not None
-                                           else c.config.center.order))
+            self.cards.sort(key=lambda c: c.config.card.order if c.config.card.order is not None else c.config.center.order)
 
-    def draw_card_from(self, area: "CardArea", stay_flipped: bool | None = None, discarded_only: bool = False) -> bool:
+    def draw_card_from(self, area: "CardArea", stay_flipped: Any = None, discarded_only: bool = False) -> bool:
         G = self.G
         if len(self.cards) < self.config.card_limit or self is G.deck or self is G.hand:
             card = area.remove_card(None, discarded_only)
             if card is not None:
-                stay = G.GAME.blind.stay_flipped(self, card) if G.GAME.blind else None
+                stay = G.GAME.blind.stay_flipped(self, card) if G.GAME and G.GAME.blind else None
                 if self is G.hand and G.GAME.modifiers.flipped_cards:
-                    if G.rng.random("flipped_card") < 1 / G.GAME.modifiers.flipped_cards:
+                    if G.rng.random(G.rng.pseudoseed("flipped_card")) < 1 / G.GAME.modifiers.flipped_cards:
                         stay = True
                 self.emplace(card, None, stay)
                 return True
         return False
 
+    # ------------------------------------------------------------ per frame
+    def update(self) -> None:
+        G = self.G
+        if self is G.hand:
+            per = G.GAME.modifiers.minus_hand_size_per_X_dollar
+            if per:
+                self.config.last_poll_size = self.config.last_poll_size or 0
+                now = G.floor(G.GAME.dollars / per)
+                if now != self.config.last_poll_size:
+                    self.change_size(self.config.last_poll_size - now)
+                    self.config.last_poll_size = now
+            for v in list(self.cards):
+                if v.ability.forced_selection and not self.highlighted:
+                    self.add_to_highlighted(v)
+        if self is G.deck and self.config.card_limit > len(G.playing_cards):
+            self.config.card_limit = len(G.playing_cards)
+        self.config.temp_limit = max(len(self.cards), self.config.card_limit)
+        self.config.card_count = len(self.cards)
+
     def remove(self) -> None:
-        """CardArea:remove() -> every card in it is removed (Card:remove)."""
-        for c in list(self.cards):
-            c.remove()
+        """CardArea:remove(): every card in it is removed too."""
+        cards = self.cards
+        for i in range(len(cards) - 1, -1, -1):
+            if i < len(cards):
+                v = cards.pop(i)
+                v.remove()
         self.cards = []
         self.removed = True

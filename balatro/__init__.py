@@ -1,5 +1,6 @@
-"""A seed-exact Python re-implementation of Balatro's game logic."""
+"""BalatroEngine: a seed-exact Python re-implementation of Balatro's game logic."""
 
-from .game import DECK_NAMES, STAKE_NAMES, Game, Profile, STATES
+from .actions import IllegalAction
+from .game import DECK_NAMES, STAKE_NAMES, STATE_NAMES, STATES, Game, Profile
 
-__all__ = ["Game", "Profile", "STATES", "DECK_NAMES", "STAKE_NAMES"]
+__all__ = ["Game", "Profile", "IllegalAction", "STATES", "STATE_NAMES", "DECK_NAMES", "STAKE_NAMES"]

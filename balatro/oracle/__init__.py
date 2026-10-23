@@ -21,16 +21,18 @@ class OracleError(RuntimeError):
 
 
 class Oracle:
-    def __init__(self, src: str | None = None, profile: str = "all", gamespeed: float = 4, dt: float = 1 / 30) -> None:
+    def __init__(self, src: str | None = None, profile: str = "all", gamespeed: float = 1, dt: float = 1 / 60) -> None:
         luajit = shutil.which("luajit")
         if luajit is None:
             raise OracleError("luajit not found on PATH")
+        if not (TOOLS / "oracle.lua").exists():
+            raise OracleError(f"{TOOLS / 'oracle.lua'} not found: the oracle runs from a source checkout")
         env = dict(os.environ)
         if src:
             env["BALATRO_SRC"] = src
         env["ORACLE_PROFILE"] = profile
         env["ORACLE_GAMESPEED"] = str(gamespeed)
-        env["ORACLE_DT"] = str(dt)
+        env["ORACLE_DT"] = repr(dt)
         log = os.environ.get("ORACLE_LOG")
         self._log = open(log, "a") if log else subprocess.DEVNULL
         self.proc = subprocess.Popen([luajit, str(TOOLS / "oracle.lua")], stdin=subprocess.PIPE, stdout=subprocess.PIPE,

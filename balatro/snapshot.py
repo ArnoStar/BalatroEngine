@@ -1,4 +1,5 @@
-"""A comparable dump of the game state (same format as tools/lua/oracle.lua)."""
+"""A plain-data dump of the run state (the format of tools/lua/oracle.lua's
+``dump()``, so the engine can be compared with the original game)."""
 
 from __future__ import annotations
 
@@ -70,7 +71,8 @@ def area_desc(area: "CardArea | None") -> list | None:
 def snapshot(G: "Game") -> dict:
     GAME = G.GAME
     cr = GAME.current_round
-    s: dict[str, Any] = {
+    shop = G.shop is not None and not G.shop.removed
+    return {
         "state": G.STATE,
         "state_complete": G.STATE_COMPLETE,
         "ante": GAME.round_resets.ante,
@@ -83,7 +85,8 @@ def snapshot(G: "Game") -> dict:
         "joker_slots": G.jokers.config.card_limit if G.jokers is not None else None,
         "consumable_slots": G.consumeables.config.card_limit if G.consumeables is not None else None,
         "reroll_cost": cr.reroll_cost,
-        "blind": {"name": GAME.blind.name, "chips": fmt(GAME.blind.chips), "disabled": GAME.blind.disabled} if GAME.blind else None,
+        "blind": ({"name": GAME.blind.name, "chips": fmt(GAME.blind.chips), "disabled": GAME.blind.disabled}
+                  if GAME.blind else None),
         "blind_on_deck": GAME.blind_on_deck,
         "boss": GAME.round_resets.blind_choices.Boss,
         "voucher": cr.voucher,
@@ -96,10 +99,10 @@ def snapshot(G: "Game") -> dict:
         "play": area_desc(G.play),
         "jokers": area_desc(G.jokers),
         "consumeables": area_desc(G.consumeables),
-        "shop_jokers": area_desc(G.shop_jokers) if G.shop else None,
-        "shop_vouchers": area_desc(G.shop_vouchers) if G.shop else None,
-        "shop_booster": area_desc(G.shop_booster) if G.shop else None,
-        "pack_cards": area_desc(G.pack_cards) if G.pack_cards is not None and not G.pack_cards.removed else None,
+        "shop_jokers": area_desc(G.shop_jokers) if shop else None,
+        "shop_vouchers": area_desc(G.shop_vouchers) if shop else None,
+        "shop_booster": area_desc(G.shop_booster) if shop else None,
+        "pack_cards": area_desc(G.pack_cards),
         "pack_choices": GAME.pack_choices,
         "hands": {k: {"level": v.level, "played": v.played, "chips": v.chips, "mult": v.mult, "visible": v.visible}
                   for k, v in GAME.hands.items()},
@@ -117,4 +120,3 @@ def snapshot(G: "Game") -> dict:
         "rng": {k: fmt(v) for k, v in G.rng.state.items()},
         "hands_order": list(G.hands_order()),
     }
-    return s

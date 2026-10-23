@@ -64,10 +64,22 @@ def floor(x: float) -> float:
 
 
 def lua_mod(a: float, b: float) -> float:
-    """Lua ``a % b`` for numbers (``a - floor(a/b)*b``)."""
+    """Lua ``a % b`` for numbers (``a - floor(a/b)*b``, inf/nan propagate)."""
     if b == 0:
         return math.nan
-    return a - math.floor(a / b) * b
+    try:
+        q = a / b
+    except OverflowError:
+        q = math.inf
+    return a - floor(q) * b
+
+
+def lua_pow(x: float, y: float) -> float:
+    """Lua ``x ^ y``: overflows to inf instead of raising."""
+    try:
+        return float(x) ** y
+    except OverflowError:
+        return math.inf
 
 
 def truthy(v: Any) -> bool:
@@ -78,3 +90,18 @@ def truthy(v: Any) -> bool:
 def nonempty(t: Any) -> bool:
     """``next(t)`` on a table."""
     return t is not None and len(t) > 0
+
+
+def lor(x: Any, y: Any) -> Any:
+    """Lua's ``x or y``: only nil and false fall through (0 and '' don't)."""
+    return y if x is None or x is False else x
+
+
+def lua_div(a: float, b: float) -> float:
+    """Lua ``a / b``: division by zero gives inf/-inf/nan instead of raising."""
+    try:
+        return a / b
+    except ZeroDivisionError:
+        if a != a or a == 0:
+            return math.nan
+        return math.copysign(math.inf, a) * math.copysign(1.0, b)

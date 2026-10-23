@@ -22,7 +22,7 @@ print = function(...) io.stderr:write(table.concat({ ... }, '\t'), '\n') end
 
 boot.init({ profile = os.getenv('ORACLE_PROFILE') or 'all' })
 G.SETTINGS.GAMESPEED = tonumber(os.getenv('ORACLE_GAMESPEED') or '1')
-local DT = tonumber(os.getenv('ORACLE_DT') or '0.0333333')
+local DT = tonumber(os.getenv('ORACLE_DT') or tostring(1 / 60))
 
 local function fmt(x)
   if type(x) ~= 'number' then return x end
@@ -154,12 +154,14 @@ end
 
 local function settle(max_frames)
   local quiet = 0
-  for _ = 1, max_frames or 20000 do
+  for _ = 1, max_frames or 100000 do
     -- winning opens a pausing overlay: press 'Endless' like a player would
     if G.SETTINGS.paused and G.OVERLAY_MENU and G.GAME.won and G.STATE ~= G.STATES.GAME_OVER then
       G.FUNCS.exit_overlay_menu()
     end
     boot.pump(1, DT)
+    -- the run is over: the game stays paused on the game over screen
+    if G.STATE == G.STATES.GAME_OVER and G.STATE_COMPLETE then return true end
     if is_settled() then
       quiet = quiet + 1
       if quiet >= idle_frames_needed() then return true end
@@ -177,18 +179,30 @@ local function E(ref, extra)
   return e
 end
 
+-- select exactly these cards (forced ones stay), then let the game settle,
+-- as a player selects cards before pressing a button
 local function highlight(area, idxs)
   area:unhighlight_all()
   for _, i in ipairs(idxs or {}) do
     local c = area.cards[i + 1]
     assert(c, 'no card at index ' .. tostring(i))
-    area:add_to_highlighted(c, true)
+    local already = false
+    for _, h in ipairs(area.highlighted) do if h == c then already = true end end
+    if not already then area:add_to_highlighted(c, true) end
   end
+  settle()
 end
 
 local handlers = {}
 
 function handlers.start(cmd)
+  -- every run starts from the same clock, so frame timings are reproducible
+  G.TIMERS.TOTAL = 0
+  G.TIMERS.REAL = 0
+  G.E_MANAGER.queue_timer = 0
+  G.E_MANAGER.queue_last_processed = 0
+  G.ACC = 0
+  G.last_materialized = nil
   boot.start_run({ seed = cmd.seed, deck = cmd.deck or 'Red Deck', stake = cmd.stake or 1, challenge = cmd.challenge })
 end
 
@@ -273,20 +287,31 @@ function handlers.cheat(cmd)
   if cmd.dollars then G.GAME.dollars = cmd.dollars end
   if cmd.ante then G.GAME.round_resets.ante = cmd.ante; G.GAME.round_resets.blind_ante = cmd.ante end
   if cmd.boss then G.GAME.round_resets.blind_choices.Boss = cmd.boss end
+  if cmd.win and G.STATE == G.STATES.SELECTING_HAND then
+    G.GAME.chips = G.GAME.blind.chips
+    G.STATE = G.STATES.NEW_ROUND
+    G.STATE_COMPLETE = false
+  end
 end
 
 function handlers.add_joker(cmd)
   add_joker(cmd.key, cmd.edition)
 end
 
+-- (an Orbital Tag needs a poker hand: given the way Double Tag copies get one)
 function handlers.add_tag(cmd)
+  if cmd.key == 'tag_orbital' then G.orbital_hand = cmd.orbital_hand or 'High Card' end
   add_tag(Tag(cmd.key))
+  G.orbital_hand = nil
 end
 
--- redeem a voucher for free, the way challenge vouchers are applied
+-- redeem a voucher for free (applied through a voucher card, as Reroll
+-- Surplus/Glut need one)
 function handlers.add_voucher(cmd)
   G.GAME.used_vouchers[cmd.key] = true
-  Card.apply_to_run(nil, G.P_CENTERS[cmd.key])
+  local card = Card(0, 0, G.CARD_W, G.CARD_H, nil, G.P_CENTERS[cmd.key])
+  card:apply_to_run()
+  card:remove()
 end
 
 for line in io.lines() do

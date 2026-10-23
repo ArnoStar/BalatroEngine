@@ -1,27 +1,34 @@
-"""The Game object (``G`` in the Lua source): run state, card areas, helpers.
+"""The Game object (the global ``G`` of the Lua source).
 
-Gameplay functions are split over mixins (pools, flow, shop, packs) but all
-operate on this object, mirroring how the Lua code uses the global ``G``.
+It owns the run state (``G.GAME``), the card areas, the event queue and the
+frame loop.  :meth:`Game.frame` is a port of ``Game:update``: timers, the
+event manager, the state machine, the UI motion the logic waits on, every
+card's per-frame update and the controller locks, in the game's order.
+Player actions (see actions.py) are applied between frames and the game is
+then run frame by frame until it waits for input again.
 """
 
 from __future__ import annotations
 
+import copy
 import math
-from collections import deque
-from typing import Any, Callable, Iterable
+import random
+from typing import Any, Iterable
 
 from . import data as data_mod
 from .actions import ActionsMixin
 from .back import Back
 from .blind import Blind
+from .buttons import ButtonsMixin
+from .card import _UPDATE_NAMES as UPDATE_NAMES
 from .card import Card
 from .cardarea import CardArea
-from .flow import FlowMixin
-from .lua import T, copy_table, floor, to_T
-from .packs import PacksMixin
-from .pools import PoolsMixin
-from .rng import PseudoRandom, normalize_seed
-from .shop import ShopMixin
+from .common import CommonMixin
+from .events import EventManager
+from .lua import T, copy_table, to_T
+from .rng import SEED_ALPHABET, PseudoRandom, lua_tostring, normalize_seed
+from .state_events import StateEventsMixin
+from .ui import HAND_H, ROOM_Y, TILE_H, Box, move_hand
 
 
 class STATES:
@@ -47,6 +54,7 @@ class STATES:
 
 
 STATE_NAMES = {v: k for k, v in vars(STATES).items() if not k.startswith("_")}
+PACK_STATES = (STATES.TAROT_PACK, STATES.PLANET_PACK, STATES.SPECTRAL_PACK, STATES.STANDARD_PACK, STATES.BUFFOON_PACK)
 
 DECK_NAMES = {
     "red": "b_red", "blue": "b_blue", "yellow": "b_yellow", "green": "b_green", "black": "b_black",
@@ -56,13 +64,29 @@ DECK_NAMES = {
 }
 STAKE_NAMES = {"white": 1, "red": 2, "green": 3, "black": 4, "blue": 5, "purple": 6, "orange": 7, "gold": 8}
 
+# ``pairs(G.GAME.hands)`` iteration order.  It decides To Do List targets, the
+# Orbital Tag hand and The Ox's tie-break (and nothing else).  LuaJIT keys
+# string hashes with a per-process random seed, so in the real game this order
+# changes from one launch to the next: the seed fixes *which position* is
+# chosen, the session fixes which hand sits there.  Pass ``hands_order`` to
+# match a particular session (the oracle reports the order it used).
+DEFAULT_HANDS_ORDER = [
+    "Flush Five", "Flush House", "Five of a Kind", "Straight Flush", "Four of a Kind", "Full House",
+    "Flush", "Straight", "Three of a Kind", "Two Pair", "Pair", "High Card",
+]
+
+
+def _num(x: float) -> str:
+    """A number as the game shows it (no trailing .0)."""
+    return str(int(x)) if isinstance(x, float) and x.is_integer() and abs(x) < 1e15 else str(x)
+
 
 class Profile:
-    """Which centers are unlocked/discovered (affects pools).
+    """Which centers are unlocked/discovered (this changes the pools).
 
-    Seed finders assume everything is unlocked; ``Profile.fresh()`` is a brand
-    new save.  Discoveries made during a *seeded* run don't count in the game,
-    so the profile is static for the whole run.
+    Seed finders assume everything is unlocked; :meth:`fresh` is a brand new
+    save.  A seeded run never unlocks or discovers anything, so the profile
+    stays fixed for the whole run.
     """
 
     def __init__(self, unlocked: set[str] | None = None, discovered: set[str] | None = None, all_: bool = True) -> None:
@@ -83,14 +107,35 @@ class Profile:
         return cls(unlocked, discovered, all_=False)
 
 
-class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
+class Controller:
+    """The parts of engine/controller.lua the logic reads: the locks."""
+
+    def __init__(self) -> None:
+        self.locks = T()
+        self.locked = False
+
+    def update(self) -> None:
+        # (as in the oracle: frame locks only last a frame, wipes never happen)
+        self.locks.wipe = False
+        self.locks.frame_set = None
+        self.locks.frame = None
+        self.locked = any(bool(v) for v in self.locks.values())
+
+
+class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
+    """A Balatro run.
+
+    ``Game(seed, deck, stake, challenge=None)`` (no seed: a random one); call
+    :meth:`start_run`, then play it with the ``act_*`` methods (actions.py).
+    The run behaves as a seeded run: nothing gets unlocked or discovered.
+    """
+
     STATES = STATES
 
-    def __init__(self, seed: str, deck: str = "b_red", stake: int | str = 1, challenge: str | None = None,
+    def __init__(self, seed: str | None = None, deck: str = "b_red", stake: int | str = 1, challenge: str | None = None,
                  profile: Profile | None = None, hands_order: Iterable[str] | None = None,
-                 normalize: bool = True) -> None:
-        self.data = data_mod.load()
-        d = self.data
+                 game_speed: float = 1, normalize: bool = True, fast_forward: bool = True) -> None:
+        self.data = d = data_mod.load()
         self.P_CENTERS = d.P_CENTERS
         self.P_CARDS = d.P_CARDS
         self.P_BLINDS = d.P_BLINDS
@@ -98,80 +143,85 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
         self.P_SEALS = d.P_SEALS
         self.P_CENTER_POOLS = d.P_CENTER_POOLS
         self.P_JOKER_RARITY_POOLS = d.P_JOKER_RARITY_POOLS
-        self.P_CARD_KEY = {id(v): k for k, v in d.P_CARDS.items()}
+        self.P_CARD_KEY = d.P_CARD_KEY
         self.handlist = d.handlist
         self.profile = profile or Profile.everything()
         self._hands_order = list(hands_order) if hands_order is not None else list(DEFAULT_HANDS_ORDER)
 
+        if seed is None:  # like an unseeded run: a fresh random seed (8 characters)
+            seed = "".join(random.SystemRandom().choice(SEED_ALPHABET) for _ in range(8))
         self.seed = normalize_seed(seed) if normalize else seed
         self.deck_key = DECK_NAMES.get(deck.lower(), deck) if isinstance(deck, str) else deck
         self.stake = STAKE_NAMES.get(stake.lower(), 1) if isinstance(stake, str) else stake
         self.challenge_id = challenge
 
-        # runtime bookkeeping (globals in the Lua)
+        # engine globals
+        self.SETTINGS = T(GAMESPEED=game_speed, paused=False)
+        self.TIMERS = {"TOTAL": 0.0, "REAL": 0.0}
+        self.FRAMES_MOVE = 0
+        self.dt = 1 / 60
+        # skip the work of frames in which nothing can happen (identical results)
+        self.fast_forward = fast_forward
+        self._idle: tuple[float, float, float, float] | None = None
+        self.real_dt = self.dt
+        self.ACC: float = 0
+        self.ACC_state: int | None = None
+        self.SPEEDFACTOR: float = 1
+        self.exp_xy = 0.0
+        self.move_dt = 0.0
+        self.max_vel = 0.0
+        self.CONTROLLER = Controller()
+        self.E_MANAGER = EventManager(self)
+        self.STAGE_RUN = True
+        self.STATE: int = -1
+        self.STATE_COMPLETE = False
+        self.node_id = 0
         self.sort_id = 0
         self.tagid = 0
         self.playing_card = 0
-        self.stone_id_counter = -100
-        self.all_cards: list[Card] = []
-        self.events: deque[Callable[[], Any]] = deque()
-        self.deferred: list[Callable[[], Any]] = []
+        self.stone_id = -100
+        self.I_CARD: list[Card] = []
         self.OVERLAY_MENU = None
         self.FORCE_TAG = None
         self.FORCE_BOSS = None
         self.orbital_hand = None
         self.from_boss_tag = None
-        self.ARGS = T()
-        self.STATE = STATES.BLIND_SELECT
-        self.STATE_COMPLETE = False
         self.TAROT_INTERRUPT = None
-        self.shop = None
-        self.blind_select = None
-        self.booster_pack = None
-        self.round_eval = None
+        self.RESET_JIGGLES = None
+        self.RESET_BLIND_STATES = None
+        self.boss_throw_hand = None
+        self.deck_preview = None
+        self.last_materialized = None
+        self.ARGS = T()
+        # UI boxes the logic reads or writes
+        self.shop: Box | None = None
+        self.SHOP_SIGN: Box | None = None
+        self.blind_select: Box | None = None
+        self.blind_prompt_box: Box | None = None
+        self.blind_select_tags: T = T()
+        self.booster_pack: Box | None = None
+        self.round_eval: Box | None = None
+        self.hand_T_y = TILE_H - HAND_H
+        # card areas
         self.shop_jokers: CardArea | None = None
         self.shop_vouchers: CardArea | None = None
         self.shop_booster: CardArea | None = None
         self.pack_cards: CardArea | None = None
-        self.play: CardArea | None = None
-        self.jokers: CardArea | None = None
-        self.consumeables: CardArea | None = None
-        self.hand: CardArea | None = None
-        self.deck: CardArea | None = None
-        self.discard: CardArea | None = None
+        # (these six exist once start_run() has run)
+        self.play: CardArea = None  # type: ignore[assignment]
+        self.jokers: CardArea = None  # type: ignore[assignment]
+        self.consumeables: CardArea = None  # type: ignore[assignment]
+        self.hand: CardArea = None  # type: ignore[assignment]
+        self.deck: CardArea = None  # type: ignore[assignment]
+        self.discard: CardArea = None  # type: ignore[assignment]
         self.playing_cards: list[Card] = []
         self.GAME: T = self.init_game_object()
         self.rng = PseudoRandom(self.seed)
-        self.log: list[Any] = []
+        self.last_score: T | None = None
+        self.last_scoring: T | None = None
+        self.round_eval_rows: list | None = None
 
-    def snapshot(self) -> dict:
-        from .snapshot import snapshot
-        return snapshot(self)
-
-    def clone(self) -> "Game":
-        """An independent copy of the whole run (for what-if exploration).
-
-        Static prototype tables are shared, everything else is copied, so the
-        clone continues with exactly the same RNG streams and state.
-        """
-        import copy
-        memo: dict[int, Any] = {id(self.data): self.data, id(self.profile): self.profile}
-        for table in (self.P_CENTERS, self.P_CARDS, self.P_BLINDS, self.P_TAGS, self.P_SEALS,
-                      self.data.P_STAKES):
-            memo[id(table)] = table
-            for v in table.values():
-                memo[id(v)] = v
-        for pool in self.P_CENTER_POOLS.values():
-            memo[id(pool)] = pool
-        memo[id(self.P_CENTER_POOLS)] = self.P_CENTER_POOLS
-        for pool in self.P_JOKER_RARITY_POOLS:
-            memo[id(pool)] = pool
-        memo[id(self.P_JOKER_RARITY_POOLS)] = self.P_JOKER_RARITY_POOLS
-        memo[id(self.P_CARD_KEY)] = self.P_CARD_KEY
-        memo[id(self.handlist)] = self.handlist
-        return copy.deepcopy(self, memo)
-
-    # ------------------------------------------------------------- profile
+    # ------------------------------------------------------------ helpers
     def is_unlocked(self, center: T) -> bool:
         if self.profile.all:
             return True
@@ -185,216 +235,92 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
         return key in self.profile.discovered
 
     def hands_order(self) -> list[str]:
-        """Iteration order of ``pairs(G.GAME.hands)`` (see DEFAULT_HANDS_ORDER)."""
+        """The order of ``pairs(G.GAME.hands)`` (see DEFAULT_HANDS_ORDER)."""
         return self._hands_order
 
-    # -------------------------------------------------------------- events
-    def add_event(self, fn: Callable[[], Any], front: bool = False) -> None:
-        if front:
-            self.events.appendleft(fn)
-        else:
-            self.events.append(fn)
+    def ante_str(self) -> str:
+        return lua_tostring(self.GAME.round_resets.ante)
 
-    def run_events(self) -> None:
-        ev = self.events
-        while ev:
-            ev.popleft()()
+    def next_draws(self, n: int | None = None) -> list[Card]:
+        """The cards the deck will deal next, in order (it deals from the end
+        of ``G.deck.cards``).  The deck is reshuffled when a round starts."""
+        cards = self.deck.cards[::-1] if self.deck is not None else []
+        return cards if n is None else cards[:n]
 
-    def defer(self, fn: Callable[[], Any]) -> None:
-        """Non-blockable delayed events: run once the action has settled."""
-        self.deferred.append(fn)
-
-    def defer_removal(self, card: Card) -> None:
-        self.defer(card.remove)
-
-    def run_deferred_one_frame(self) -> None:
-        """Fire every pending timed (non-blockable) effect; events they queue
-        join the normal queue."""
-        while self.deferred:
-            fns, self.deferred = self.deferred, []
-            for fn in fns:
-                fn()
-
-    def run_deferred(self) -> None:
-        while self.deferred:
-            self.run_deferred_one_frame()
-            self.run_events()
-
-    # ------------------------------------------------------------- helpers
-    def find_joker(self, name: str, non_debuff: bool = False) -> list[Card]:
-        out = []
-        if self.jokers is None:
-            return out
-        for v in self.jokers.cards:
-            if v.ability.name == name and (non_debuff or not v.debuff):
-                out.append(v)
-        for v in self.consumeables.cards:
-            if v.ability.name == name and (non_debuff or not v.debuff):
-                out.append(v)
-        return out
-
-    def get_blind_amount(self, ante: int) -> float:
-        k = 0.75
-        scaling = self.GAME.modifiers.scaling
-        if not scaling or scaling == 1:
-            amounts = [300, 800, 2000, 5000, 11000, 20000, 35000, 50000]
-        elif scaling == 2:
-            amounts = [300, 900, 2600, 8000, 20000, 36000, 60000, 100000]
-        else:
-            amounts = [300, 1000, 3200, 9000, 25000, 60000, 110000, 200000]
-        if ante < 1:
-            return 100
-        if ante <= 8:
-            return amounts[ante - 1]
-        a, b, c, dd = amounts[7], 1.6, ante - 8, 1 + 0.2 * (ante - 8)
-        amount = floor(a * (b + (k * c) ** dd) ** c)
-        if amount == math.inf:
-            return amount
-        amount = amount - amount % (10 ** math.floor(math.log10(amount) - 1))
-        return amount
-
-    def refresh_all_costs(self) -> None:
-        for c in list(self.all_cards):
-            c.set_cost()
-
-    def update_cards(self) -> None:
-        """Per-frame CardArea:update + Card:update logic (Game:update -> MOVEABLES)."""
+    def summary(self) -> str:
+        """A short human-readable description of the current situation."""
+        from .analyzer import describe
         G = self
-        hand = G.hand
-        if hand is not None:
-            per = G.GAME.modifiers.minus_hand_size_per_X_dollar
-            if per:
-                last = hand.config.last_poll_size or 0
-                now = math.floor(G.GAME.dollars / per)
-                if now != last:
-                    hand.change_size(last - now)
-                    hand.config.last_poll_size = now
-            for c in list(hand.cards):
-                if c.ability.forced_selection and not hand.highlighted:
-                    hand.add_to_highlighted(c)
-        if G.deck is not None and G.deck.config.card_limit > len(G.playing_cards):
-            G.deck.config.card_limit = len(G.playing_cards)
-        for c in list(self.all_cards):
-            if not c.removed:
-                c.update()
+        GAME = G.GAME
+        cr = GAME.current_round
+        rr = GAME.round_resets
+        lines = [f"{G.seed} ante {rr.ante} round {GAME.round}  {STATE_NAMES.get(G.STATE, G.STATE)}  ${_num(GAME.dollars)}"]
 
-    def ease_dollars(self, mod: float, instant: bool = False) -> None:
-        def _mod() -> None:
-            self.GAME.dollars = self.GAME.dollars + (mod or 0)
-        if instant:
-            _mod()
-        else:
-            self.add_event(_mod)
+        def row(label: str, cards: list[Card]) -> None:
+            lines.append(f"  {label}: " + (", ".join(f"{i}:{describe(c)}" for i, c in enumerate(cards)) or "-"))
+        if G.STATE == STATES.BLIND_SELECT:
+            tags = rr.blind_tags or T()
+            lines.append(f"  on deck: {GAME.blind_on_deck}  boss: {G.data.display_name(rr.blind_choices.Boss)}  "
+                         f"tags: {tags.Small} / {tags.Big}")
+        if GAME.blind and GAME.blind.name:
+            lines.append(f"  blind: {GAME.blind.name}  {GAME.chips:.0f} / {GAME.blind.chips:.0f} chips  "
+                         f"hands {cr.hands_left}  discards {cr.discards_left}")
+        if G.jokers is not None:
+            row(f"jokers {len(G.jokers.cards)}/{G.jokers.config.card_limit}", G.jokers.cards)
+            row(f"consumables {len(G.consumeables.cards)}/{G.consumeables.config.card_limit}", G.consumeables.cards)
+        if G.hand is not None and G.hand.cards:
+            row("hand", G.hand.cards)
+        if G.shop is not None and not G.shop.removed:
+            row("shop", G.shop_jokers.cards)
+            row("vouchers", G.shop_vouchers.cards)
+            row("packs", G.shop_booster.cards)
+            lines.append(f"  reroll ${_num(cr.reroll_cost)}")
+        if G.pack_cards is not None and not G.pack_cards.removed and G.in_pack():
+            row(f"pack (choose {GAME.pack_choices})", G.pack_cards.cards)
+        if GAME.tags:
+            lines.append("  tags: " + ", ".join(t.key for t in GAME.tags))
+        return "\n".join(lines)
 
-    def ease_discard(self, mod: float, instant: bool = False, silent: bool = False) -> None:
-        def _mod() -> None:
-            cr = self.GAME.current_round
-            if abs(max(cr.discards_left, mod)) == 0:
-                return
-            m = max(-cr.discards_left, mod or 0)
-            cr.discards_left = cr.discards_left + m
-        if instant:
-            _mod()
-        else:
-            self.add_event(_mod)
+    def snapshot(self) -> dict:
+        """The run state as plain data (the oracle's format, see snapshot.py)."""
+        from .snapshot import snapshot
+        return snapshot(self)
 
-    def ease_hands_played(self, mod: float, instant: bool = False) -> None:
-        def _mod() -> None:
-            self.GAME.current_round.hands_left = self.GAME.current_round.hands_left + (mod or 0)
-        if instant:
-            _mod()
-        else:
-            self.add_event(_mod)
+    def clone(self) -> "Game":
+        """An independent copy of the whole run (for what-if exploration).
 
-    def ease_ante(self, mod: int) -> None:
-        def _mod() -> None:
-            self.GAME.round_resets.ante = self.GAME.round_resets.ante + (mod or 0)
-        self.add_event(_mod)
-
-    def ease_round(self, mod: int) -> None:
-        def _mod() -> None:
-            self.GAME.round = self.GAME.round + (mod or 0)
-        self.add_event(_mod)
-
-    def ease_chips(self, mod: float) -> None:
-        def _mod() -> None:
-            self.GAME.chips = mod or 0
-        self.add_event(_mod)
-
-    def level_up_hand(self, card: Any, hand: str, instant: Any = None, amount: int = 1) -> None:
-        h = self.GAME.hands[hand]
-        h.level = max(0, h.level + amount)
-        h.mult = max(h.s_mult + h.l_mult * (h.level - 1), 1)
-        h.chips = max(h.s_chips + h.l_chips * (h.level - 1), 0)
-
-    def calculate_reroll_cost(self, skip_increment: bool = False) -> None:
-        cr = self.GAME.current_round
-        if cr.free_rerolls < 0:
-            cr.free_rerolls = 0
-        if cr.free_rerolls > 0:
-            cr.reroll_cost = 0
-            return
-        cr.reroll_cost_increase = cr.reroll_cost_increase or 0
-        if not skip_increment:
-            cr.reroll_cost_increase += 1
-        rr = self.GAME.round_resets
-        cr.reroll_cost = (rr.temp_reroll_cost if rr.temp_reroll_cost is not None else rr.reroll_cost) + cr.reroll_cost_increase
-
-    def add_tag(self, tag: Any) -> None:
-        for t in list(self.GAME.tags):
-            t.apply_to_run(T(type="tag_add", tag=tag))
-        self.GAME.tags.append(tag)
-
-    def change_shop_size(self, mod: int) -> None:
-        G = self
-        if not G.GAME.shop:
-            return
-        G.GAME.shop.joker_max = G.GAME.shop.joker_max + mod
-        if G.shop_jokers is not None and not G.shop_jokers.removed:
-            if mod < 0:
-                for i in range(len(G.shop_jokers.cards) - 1, G.GAME.shop.joker_max - 1, -1):
-                    if i < len(G.shop_jokers.cards):
-                        G.shop_jokers.cards[i].remove()
-            G.shop_jokers.config.card_limit = G.GAME.shop.joker_max
-            if mod > 0:
-                for _ in range(G.GAME.shop.joker_max - len(G.shop_jokers.cards)):
-                    G.shop_jokers.emplace(G.create_card_for_shop(G.shop_jokers))
-
-    def playing_card_joker_effects(self, cards: list[Any]) -> None:
-        for j in list(self.jokers.cards):
-            j.calculate_joker(T(playing_card_added=True, cards=cards))
-
-    def draw_card(self, from_: CardArea | None, to: CardArea, card: Card | None = None, sort: bool = False,
-                  stay_flipped: Any = None, discarded_only: bool = False) -> None:
-        """draw_card() from common_events.lua: the move happens in an event."""
-        G = self
-
-        def ev() -> None:
-            c = card
-            if c is not None:
-                if from_ is not None:
-                    c = from_.remove_card(c)
-                stay = G.GAME.blind.stay_flipped(to, c) if G.GAME and G.GAME.blind else None
-                if G.GAME.modifiers.flipped_cards and to is G.hand:
-                    if G.rng.random("flipped_card") < 1 / G.GAME.modifiers.flipped_cards:
-                        stay = True
-                to.emplace(c, None, stay)
-            else:
-                to.draw_card_from(from_, stay_flipped, discarded_only)
-            if sort:
-                to.sort()
-        G.add_event(ev)
+        Static prototype tables are shared, everything else is copied, so the
+        copy continues exactly like the original would."""
+        memo: dict[int, Any] = {id(self.data): self.data, id(self.profile): self.profile}
+        d = self.data
+        for table in (d.P_CENTERS, d.P_CARDS, d.P_BLINDS, d.P_TAGS, d.P_SEALS, d.P_STAKES):
+            memo[id(table)] = table
+            for v in table.values():
+                memo[id(v)] = v
+                if isinstance(v, T) and v.config is not None:
+                    memo[id(v.config)] = v.config
+        for pool in d.P_CENTER_POOLS.values():
+            memo[id(pool)] = pool
+        memo[id(d.P_CENTER_POOLS)] = d.P_CENTER_POOLS
+        for pool in d.P_JOKER_RARITY_POOLS:
+            memo[id(pool)] = pool
+        memo[id(d.P_JOKER_RARITY_POOLS)] = d.P_JOKER_RARITY_POOLS
+        memo[id(d.P_CARD_KEY)] = d.P_CARD_KEY
+        memo[id(self.handlist)] = self.handlist
+        # (pending events copy the closures they hold, see Event.__deepcopy__)
+        return copy.deepcopy(self, memo)
 
     # ------------------------------------------------------- game object
     def init_game_object(self) -> T:
         d = self.data
         bosses_used = T({k: 0 for k, v in d.P_BLINDS.items() if v.boss})
-        g = T(
+        return T(
             won=False,
-            round_scores=T(new_collection=T(amt=0), cards_played=T(amt=0), cards_discarded=T(amt=0),
-                           times_rerolled=T(amt=0), cards_purchased=T(amt=0), hand=T(amt=0)),
+            round_scores=T(furthest_ante=T(amt=0), furthest_round=T(amt=0), hand=T(amt=0), poker_hand=T(amt=0),
+                           new_collection=T(amt=0), cards_played=T(amt=0), cards_discarded=T(amt=0),
+                           times_rerolled=T(amt=0), cards_purchased=T(amt=0)),
             joker_usage=T(), consumeable_usage=T(), hand_usage=T(), last_tarot_planet=None, win_ante=8,
-            stake=1, modifiers=T(), starting_params=to_T(dict(d.starting_params)), banned_keys=T(), round=0,
+            stake=1, modifiers=T(), starting_params=to_T(copy_table(d.starting_params)), banned_keys=T(), round=0,
             probabilities=T(normal=1), bosses_used=bosses_used, pseudorandom=T(), starting_deck_size=52,
             ecto_minus=1, pack_size=2, skips=0, STOP_USE=0, edition_rate=1, joker_rate=20, tarot_rate=4,
             planet_rate=4, spectral_rate=0, playing_card_rate=0, consumeable_buffer=0, joker_buffer=0,
@@ -404,11 +330,12 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
             sort="desc", previous_round=T(dollars=4), tags=[], tag_tally=0, pool_flags=T(), used_jokers=T(),
             used_vouchers=T(),
             current_round=T(
-                current_hand=T(chips=0, mult=0, chip_total=0, handname=""),
-                used_packs=T(), cards_flipped=0, idol_card=T(suit="Spades", rank="Ace"), mail_card=T(rank="Ace"),
-                ancient_card=T(suit="Spades"), castle_card=T(suit="Spades"), hands_left=0, hands_played=0,
-                discards_left=0, discards_used=0, dollars=0, reroll_cost=5, reroll_cost_increase=0,
-                jokers_purchased=0, free_rerolls=0, round_dollars=0, most_played_poker_hand="High Card",
+                current_hand=T(chips=0, mult=0, chip_total=0, handname="", hand_level=""),
+                used_packs=T(), cards_flipped=0, round_text="Round ", idol_card=T(suit="Spades", rank="Ace"),
+                mail_card=T(rank="Ace"), ancient_card=T(suit="Spades"), castle_card=T(suit="Spades"),
+                hands_left=0, hands_played=0, discards_left=0, discards_used=0, dollars=0, reroll_cost=5,
+                reroll_cost_increase=0, jokers_purchased=0, free_rerolls=0, round_dollars=0,
+                most_played_poker_hand="High Card",
             ),
             round_resets=T(hands=1, discards=1, reroll_cost=1, temp_reroll_cost=None, temp_handsize=None, ante=1,
                            blind_ante=1, blind_states=T(Small="Select", Big="Upcoming", Boss="Upcoming"),
@@ -419,10 +346,11 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
                             ("Ace", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King")}),
             hands=to_T(copy_table(d.hands_proto)),
         )
-        return g
 
-    # -------------------------------------------------------------- start
+    # ------------------------------------------------------------- start
     def start_run(self) -> "Game":
+        """Game:start_run(): set up the run, then run it until it waits for
+        the first decision (the blind select screen)."""
         G = self
         GAME = G.GAME
         challenge = G.data.challenge(G.challenge_id) if G.challenge_id else None
@@ -430,6 +358,10 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
             back_center = G.data.center_by_name(challenge.deck.type)
         else:
             back_center = G.P_CENTERS[G.deck_key]
+        G.STATE = STATES.BLIND_SELECT
+        G.STATE_COMPLETE = False
+        G.SETTINGS.paused = False
+        G.RESET_BLIND_STATES = True
         GAME.stake = G.stake
         GAME.STOP_USE = 0
         GAME.selected_back = Back(G, back_center)
@@ -449,32 +381,10 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
             GAME.modifiers.enable_perishables_in_shop = True
         if GAME.stake >= 8:
             GAME.modifiers.enable_rentals_in_shop = True
-
-        # card areas exist before any event runs
-        sp = GAME.starting_params
-        G.consumeables = CardArea(G, "consumeables", {"card_limit": sp.consumable_slots, "type": "joker", "highlight_limit": 1})
-        G.jokers = CardArea(G, "jokers", {"card_limit": sp.joker_slots, "type": "joker", "highlight_limit": 1})
-        G.discard = CardArea(G, "discard", {"card_limit": 500, "type": "discard"})
-        G.deck = CardArea(G, "deck", {"card_limit": 52, "type": "deck"})
-        G.hand = CardArea(G, "hand", {"card_limit": sp.hand_size, "type": "hand"})
-        G.play = CardArea(G, "play", {"card_limit": 5, "type": "play"})
-        GAME.blind = Blind(G)
-
         GAME.selected_back.apply_to_run()
-
         if challenge is not None:
             self._apply_challenge(challenge)
-            sp = GAME.starting_params
-
-        # CardAreas above were created with the *pre*-deck starting params in
-        # the Lua as well?  No: start_run builds areas after apply_to_run.
-        G.consumeables.config.card_limit = sp.consumable_slots
-        G.consumeables.config.temp_limit = sp.consumable_slots
-        G.jokers.config.card_limit = sp.joker_slots
-        G.jokers.config.temp_limit = sp.joker_slots
-        G.hand.config.card_limit = sp.hand_size
-        G.hand.config.temp_limit = sp.hand_size
-
+        sp = GAME.starting_params
         rr = GAME.round_resets
         rr.hands = sp.hands
         rr.discards = sp.discards
@@ -492,17 +402,31 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
         rr.blind_tags.Small = G.get_next_tag_key()
         rr.blind_tags.Big = G.get_next_tag_key()
 
-        # starting deck
-        card_protos: list[T] = []
+        G.CONTROLLER.locks.load = True
+
+        def unlock_load() -> None:
+            G.CONTROLLER.locks.load = None
+        G.ev(unlock_load, no_delete=True, trigger="after", blocking=False, blockable=False, delay=3.5, timer="TOTAL")
+
+        G.consumeables = CardArea(G, "consumeables", {"card_limit": sp.consumable_slots, "type": "joker", "highlight_limit": 1})
+        G.jokers = CardArea(G, "jokers", {"card_limit": sp.joker_slots, "type": "joker", "highlight_limit": 1})
+        G.discard = CardArea(G, "discard", {"card_limit": 500, "type": "discard"})
+        G.deck = CardArea(G, "deck", {"card_limit": 52, "type": "deck"})
+        G.hand = CardArea(G, "hand", {"card_limit": sp.hand_size, "type": "hand"})
+        G.play = CardArea(G, "play", {"card_limit": 5, "type": "play"})
+        G.playing_cards = []
+        G.hand_T_y = TILE_H - HAND_H  # set_screen_positions
+
+        # the starting deck
         de = challenge.deck if challenge is not None and challenge.deck else None
         if de is not None and de.cards:
-            card_protos = [T(v) for v in de.cards]
+            protos = [T(v) for v in de.cards]
         else:
-            # pairs() order over P_CARDS is irrelevant: every pass is either
-            # unconditional (52 erratic draws) or the result gets sorted below
-            for k in G.data.P_CARDS_SORTED_KEYS:
+            protos = []
+            keys = G.data.P_CARDS_SORTED_KEYS
+            for k in G.data.P_CARDS_PAIRS_ORDER:
                 if sp.erratic_suits_and_ranks:
-                    k = G.data.P_CARDS_SORTED_KEYS[G.rng.element_index(52, G.rng.pseudoseed("erratic"))]
+                    k = keys[G.rng.element_index(len(keys), G.rng.pseudoseed("erratic"))]
                 r, s = k[2], k[0]
                 keep, e, dd, g = True, None, None, None
                 if de is not None:
@@ -518,15 +442,16 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
                 if sp.no_faces and r in ("K", "Q", "J"):
                     keep = False
                 if keep:
-                    card_protos.append(T(s=s, r=r, e=e, d=dd, g=g))
+                    protos.append(T(s=s, r=r, e=e, d=dd, g=g))
         if sp.extra_cards:
             for v in sp.extra_cards:
-                card_protos.append(T(v))
-        card_protos.sort(key=lambda p: (p.s or "") + (p.r or "") + (p.e or "") + (p.d or "") + (p.g or ""))
-        for p in card_protos:
+                protos.append(T(v))
+        protos.sort(key=lambda p: (p.s or "") + (p.r or "") + (p.e or "") + (p.d or "") + (p.g or ""))
+        for p in protos:
             G.card_from_control(p)
         GAME.starting_deck_size = len(G.playing_cards)
 
+        G.delay(0.5)
         GAME.current_round.discards_left = rr.discards
         GAME.current_round.hands_left = rr.hands
         G.deck.shuffle()
@@ -536,52 +461,39 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
         G.reset_ancient_card()
         G.reset_castle_card()
 
+        GAME.blind = Blind(G)
         GAME.blind.set_blind(None, None, True)
         G.reset_blinds()
-        G.STATE = STATES.BLIND_SELECT
-        G.STATE_COMPLETE = False
-        G.advance()
+        G.ev(None)  # unlock_notify
+        G.settle()
         return self
-
-    def card_from_control(self, control: T) -> Card:
-        G = self
-        G.playing_card = (G.playing_card + 1) if G.playing_card else 1
-        card = Card(G, G.P_CARDS[control.s + "_" + control.r], G.P_CENTERS[control.e or "c_base"],
-                    {"playing_card": G.playing_card})
-        if control.d:
-            card.set_edition(T({control.d: True}), True, True)
-        if control.g:
-            card.set_seal(control.g, True, True)
-        G.deck.emplace(card)
-        G.playing_cards.append(card)
-        return card
 
     def _apply_challenge(self, ch: T) -> None:
         G = self
         GAME = G.GAME
         GAME.challenge = ch.id
         GAME.challenge_tab = ch
+        from .card import apply_to_run
         if ch.jokers:
             for i, v in enumerate(ch.jokers):
-                def mk(v: T = v) -> None:
-                    j = G.add_joker(v.id, v.edition)
+                def mk(v: T = v, i: int = i) -> None:
+                    j = G.add_joker(v.id, v.edition, i != 0)
                     if v.eternal:
                         j.set_eternal(True)
                     if v.pinned:
                         j.pinned = True
-                G.add_event(mk)
+                G.ev(mk)
         if ch.consumeables:
-            for v in ch.consumeables:
-                G.add_event(lambda v=v: G.add_joker(v.id, None))
+            for i, v in enumerate(ch.consumeables):
+                G.ev(lambda v=v, i=i: G.add_joker(v.id, None, i != 0))
         if ch.vouchers:
-            from .vouchers import apply_to_run
             for v in ch.vouchers:
                 GAME.used_vouchers[v.id] = True
 
                 def ap(v: T = v) -> None:
                     GAME.starting_voucher_count = (GAME.starting_voucher_count or 0) + 1
                     apply_to_run(G, None, G.P_CENTERS[v.id])
-                G.add_event(ap)
+                G.ev(ap)
         rules = ch.rules
         if rules:
             for v in rules.modifiers or []:
@@ -612,33 +524,407 @@ class Game(PoolsMixin, FlowMixin, ShopMixin, PacksMixin, ActionsMixin):
             for v in res.banned_other or []:
                 GAME.banned_keys[v.id] = True
 
-    def add_joker(self, key: str, edition: str | None = None, silent: Any = None, eternal: Any = None) -> Card:
+    # ===================================================== state functions
+    def update_selecting_hand(self) -> None:
         G = self
-        center = G.P_CENTERS[key]
-        area = G.consumeables if center.consumeable else G.jokers
-        card = Card(G, None, center, {"discover": True, "bypass_discovery_center": True})
-        if area is not None:
-            card.add_to_deck()
-        if edition:
-            card.set_edition(T({edition: True}))
-        if eternal:
-            card.set_eternal(True)
-        if area is not None and card.ability.set == "Joker":
-            area.emplace(card)
-        elif G.consumeables is not None:
-            G.consumeables.emplace(card)
-        return card
+        if not G.hand.cards and not G.deck.cards and not G.play.cards:
+            G.end_round()
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.STATE_COMPLETE = True
+            if not G.hand.cards and not G.deck.cards:
+                G.end_round()
 
+    def update_shop(self) -> None:
+        G = self
+        GAME = G.GAME
+        if not G.STATE_COMPLETE:
+            G.stop_use()
+            shop_exists = G.shop is not None
+            if G.shop is None:
+                G.shop_jokers = CardArea(G, "shop_jokers", {"card_limit": GAME.shop.joker_max, "type": "shop", "highlight_limit": 1})
+                G.shop_vouchers = CardArea(G, "shop_vouchers", {"card_limit": 1, "type": "shop", "highlight_limit": 1})
+                G.shop_booster = CardArea(G, "shop_booster", {"card_limit": 2, "type": "shop", "highlight_limit": 1})
+                G.SHOP_SIGN = Box(G, "cm", -15)
+                sign = G.SHOP_SIGN
+                G.ev(lambda: setattr(sign.alignment.offset, "y", 0))
+                G.shop = Box(G, "tmi", ROOM_Y + 11, moving=True)
+                G.shop.areas = [G.shop_jokers, G.shop_vouchers, G.shop_booster]
+            shop = G.shop
 
-# ``pairs(G.GAME.hands)`` iteration order.  It decides To Do List targets, the
-# Orbital Tag hand and The Ox's tie-break (and nothing else).  In LuaJIT 2.1
-# (LOVE 11.4+/Balatro) the order depends on string hashes that are keyed with
-# a random per-process seed ("Redesign and harden string interning", 2020), so
-# it changes from one game launch to the next: the seed fixes *which position*
-# is chosen, the session fixes which hand sits at that position.  The default
-# is simply the constructor's source order; pass ``hands_order`` to match a
-# particular session (the oracle reports the order it used).
-DEFAULT_HANDS_ORDER = [
-    "Flush Five", "Flush House", "Five of a Kind", "Straight Flush", "Four of a Kind", "Full House",
-    "Flush", "Straight", "Three of a Kind", "Two Pair", "Pair", "High Card",
-]
+            def arrive() -> None:
+                shop.alignment.offset.y = -5.3
+                shop.alignment.offset.x = 0
+
+                def fill() -> bool | None:
+                    if abs(shop.T_y - shop.VT_y) < 3:
+                        for t in list(GAME.tags):
+                            t.apply_to_run(T(type="shop_start"))
+                        if not shop_exists:
+                            for _ in range(GAME.shop.joker_max - len(G.shop_jokers.cards)):
+                                G.shop_jokers.emplace(G.create_card_for_shop(G.shop_jokers))
+                            if GAME.current_round.voucher and GAME.current_round.voucher in G.P_CENTERS:
+                                card = Card(G, G.P_CARDS.get("empty"), G.P_CENTERS[GAME.current_round.voucher],
+                                            {"bypass_discovery_center": True, "bypass_discovery_ui": True})
+                                card.shop_voucher = True
+                                G.create_shop_card_ui(card, "Voucher", G.shop_vouchers)
+                                card.start_materialize()
+                                G.shop_vouchers.emplace(card)
+                            for i in (1, 2):
+                                cr = GAME.current_round
+                                cr.used_packs = cr.used_packs or T()
+                                if not cr.used_packs.get(i):
+                                    cr.used_packs[i] = G.get_pack("shop_pack").key
+                                if cr.used_packs[i] != "USED":
+                                    card = Card(G, G.P_CARDS.get("empty"), G.P_CENTERS[cr.used_packs[i]],
+                                                {"bypass_discovery_center": True, "bypass_discovery_ui": True})
+                                    G.create_shop_card_ui(card, "Booster", G.shop_booster)
+                                    card.ability.booster_pos = i
+                                    card.start_materialize()
+                                    G.shop_booster.emplace(card)
+                            for t in list(GAME.tags):
+                                t.apply_to_run(T(type="voucher_add"))
+                            for t in list(GAME.tags):
+                                t.apply_to_run(T(type="shop_final_pass"))
+                        G.ev(None)  # save_run
+                        return True
+                    return None
+                G.event(fill, trigger="after", delay=0.2, blockable=False)
+            G.ev(arrive)
+            G.STATE_COMPLETE = True
+
+    def update_hand_played(self) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.STATE_COMPLETE = True
+
+            def ev() -> None:
+                if G.GAME.chips - G.GAME.blind.chips >= 0 or G.GAME.current_round.hands_left < 1:
+                    G.STATE = G.STATES.NEW_ROUND
+                else:
+                    G.STATE = G.STATES.DRAW_TO_HAND
+                G.STATE_COMPLETE = False
+            G.ev(ev)
+
+    def update_draw_to_hand(self) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.STATE_COMPLETE = True
+            for t in list(G.GAME.tags):
+                t.apply_to_run(T(type="round_start_bonus"))
+
+            def ev() -> bool:
+                if G.draw_from_deck_to_hand(None):
+                    return True
+                cr = G.GAME.current_round
+                if cr.hands_played == 0 and cr.discards_used == 0 and G.GAME.facing_blind:
+                    for j in list(G.jokers.cards):
+                        j.calculate_joker(T(first_hand_drawn=True))
+
+                def ev2() -> None:
+                    G.STATE = G.STATES.SELECTING_HAND
+                    G.STATE_COMPLETE = False
+                    G.GAME.blind.drawn_to_hand()
+                G.ev(ev2)
+                return True
+            G.event(ev)
+
+    def update_new_round(self) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.STATE_COMPLETE = True
+            G.end_round()
+
+    def update_blind_select(self) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.stop_use()
+            G.ev(None)  # save_run
+            G.STATE_COMPLETE = True
+
+            def outer() -> None:
+                def inner() -> None:
+                    G.blind_select = G.create_UIBox_blind_select()
+                    for t in list(G.GAME.tags):
+                        t.apply_to_run(T(type="immediate"))
+                    for t in list(G.GAME.tags):
+                        if t.apply_to_run(T(type="new_blind_choice")):
+                            break
+                G.ev(inner)
+            G.ev(outer)
+
+    def update_round_eval(self) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.remove()
+            G.shop = None
+        if not G.STATE_COMPLETE:
+            G.stop_use()
+            G.STATE_COMPLETE = True
+
+            def ev() -> None:
+                G.GAME.facing_blind = None
+                G.round_eval = Box(G, "bm", ROOM_Y + 19, moving=True)
+                box = G.round_eval
+
+                def arrive() -> bool | None:
+                    if box.alignment.offset.y != -7.8:
+                        box.alignment.offset.y = -7.8
+                    else:
+                        if abs(box.T_y - box.VT_y) < 3:
+                            G.delay(0.1)
+                            G.evaluate_round()
+                            return True
+                    return None
+                G.event(arrive)
+            G.ev(ev)
+
+    def update_pack(self, draw: bool, recall_delay: bool = True) -> None:
+        G = self
+        if G.shop is not None:
+            G.shop.alignment.offset.y = ROOM_Y + 11
+        if not G.STATE_COMPLETE:
+            G.STATE_COMPLETE = True
+
+            def ev() -> None:
+                size = G.GAME.pack_size
+                G.pack_cards = CardArea(G, "pack_cards", {"card_limit": size, "type": "consumeable", "highlight_limit": 1})
+                G.booster_pack = Box(G, "tmi", ROOM_Y + 9)
+                G.booster_pack.areas = [G.pack_cards]
+                G.booster_pack.alignment.offset.y = -2.2
+                if recall_delay:
+                    def inner() -> None:
+                        if draw:
+                            G.draw_from_deck_to_hand()
+                        G.ev(None, trigger="after", delay=0.5)
+                    G.ev(inner)
+                else:
+                    G.ev(None)
+            G.ev(ev)
+
+    def update_game_over(self) -> None:
+        G = self
+        if not G.STATE_COMPLETE:
+            G.SETTINGS.paused = True
+            G.overlay_menu()
+            G.STATE_COMPLETE = True
+
+    # ========================================================= frame loop
+    def update_state(self) -> None:
+        """The state-machine part of Game:update (each check sees the state
+        the previous one may have changed)."""
+        G = self
+        S = STATES
+        if G.STATE == S.SELECTING_HAND:
+            if not G.hand.cards and G.deck.cards:
+                G.STATE = S.DRAW_TO_HAND
+                G.STATE_COMPLETE = False
+            else:
+                G.update_selecting_hand()
+        if G.STATE == S.SHOP:
+            G.update_shop()
+        if G.STATE == S.HAND_PLAYED:
+            G.update_hand_played()
+        if G.STATE == S.DRAW_TO_HAND:
+            G.update_draw_to_hand()
+        if G.STATE == S.NEW_ROUND:
+            G.update_new_round()
+        if G.STATE == S.BLIND_SELECT:
+            G.update_blind_select()
+        if G.STATE == S.ROUND_EVAL:
+            G.update_round_eval()
+        if G.STATE == S.TAROT_PACK:
+            G.update_pack(True)
+        if G.STATE == S.SPECTRAL_PACK:
+            G.update_pack(True)
+        if G.STATE == S.STANDARD_PACK:
+            G.update_pack(False)
+        if G.STATE == S.BUFFOON_PACK:
+            G.update_pack(False)
+        if G.STATE == S.PLANET_PACK:
+            G.update_pack(False, False)
+        if G.STATE == S.GAME_OVER:
+            G.update_game_over()
+
+    def _next_clock(self) -> tuple[float, float, float, float]:
+        """(ACC, SPEEDFACTOR, TOTAL, REAL) after the next (unpaused) frame."""
+        G = self
+        S = STATES
+        dt = G.dt
+        acc = G.ACC if G.STATE == G.ACC_state else 0
+        speed = G.SETTINGS.GAMESPEED
+        if G.STATE == S.HAND_PLAYED or G.STATE == S.NEW_ROUND:
+            acc = min((acc or 0) + dt * 0.2 * speed, 16)
+        else:
+            acc = 0
+        sf = speed + max(0, abs(acc) - 2)
+        return acc, sf, G.TIMERS["TOTAL"] + dt * sf, G.TIMERS["REAL"] + dt
+
+    def _idle_thresholds(self) -> tuple[float, float, float, float] | None:
+        """If the next frame can only move the clocks and the UI (the state
+        machine is idle and every event the queue would handle is only waiting
+        for its time), the clock values at which that stops:
+        (TOTAL <, TOTAL <=, REAL <, REAL <=); otherwise None."""
+        G = self
+        S = STATES
+        if G.SETTINGS.paused or not G.STATE_COMPLETE or not G.fast_forward:
+            return None
+        st = G.STATE
+        if G.shop is not None and st not in (S.SHOP,) + PACK_STATES and not G.shop.removed:
+            return None  # the state functions remove it
+        hand = G.hand
+        if hand is None:
+            return None
+        if st == S.SELECTING_HAND and (not hand.cards or (not G.deck.cards and not G.play.cards)):
+            return None
+        if G.GAME.modifiers.minus_hand_size_per_X_dollar or (not hand.highlighted and any(
+                c.ability.forced_selection for c in hand.cards)):
+            return None
+        if G.deck.config.card_limit > len(G.playing_cards):
+            return None
+        inf = math.inf
+        t_lt = t_le = r_lt = r_le = inf
+        blocked = False
+        for e in G.E_MANAGER.queue:
+            if blocked and e.blockable:
+                continue
+            if not e.start_timer:
+                return None
+            trig = e.trigger
+            real = e.timer != "TOTAL"
+            if trig == "after" or trig == "before":
+                if trig == "before" and not e.complete:
+                    return None
+                due = e.time + e.delay  # due once now >= due
+                if real:
+                    r_lt = min(r_lt, due)
+                else:
+                    t_lt = min(t_lt, due)
+            elif trig == "ease":
+                if e.ease_ref is not None or e.ease_start_time is None:
+                    return None
+                end = e.ease_end_time  # done once now > end
+                if real:
+                    r_le = min(r_le, end)
+                else:
+                    t_le = min(t_le, end)
+            else:
+                return None
+            if e.blocking:
+                blocked = True
+        return t_lt, t_le, r_lt, r_le
+
+    def _light_frame(self, clock: tuple[float, float, float, float]) -> None:
+        """A frame in which no event fires: only the clocks and UI motion."""
+        G = self
+        acc, sf, total, real = clock
+        G.FRAMES_MOVE += 1
+        G.TIMERS["REAL"] = real
+        G.real_dt = G.dt
+        G.ACC = acc
+        G.ACC_state = G.STATE
+        G.SPEEDFACTOR = sf
+        G.TIMERS["TOTAL"] = total
+        em = G.E_MANAGER
+        em.queue_timer = em.queue_timer + G.real_dt
+        em.queue_last_processed = em.queue_last_processed + em.queue_dt
+        move_hand(G)
+        for box in (G.shop, G.round_eval):
+            if box is not None and not box.removed:
+                box.move()
+
+    def frame(self) -> None:
+        """One Game:update(dt)."""
+        G = self
+        if G.fast_forward:
+            th = G._idle
+            if th is None:
+                th = G._idle = G._idle_thresholds()
+            if th is not None:
+                clock = G._next_clock()
+                if clock[2] < th[0] and clock[2] <= th[1] and clock[3] < th[2] and clock[3] <= th[3]:
+                    G._light_frame(clock)
+                    return
+            G._idle = None
+        S = STATES
+        dt = G.dt
+        G.FRAMES_MOVE += 1
+        G.TIMERS["REAL"] = G.TIMERS["REAL"] + dt
+        G.real_dt = dt
+        paused = G.SETTINGS.paused
+        if paused:
+            dt = 0
+        if G.STATE != G.ACC_state:
+            G.ACC = 0
+        G.ACC_state = G.STATE
+        speed = G.SETTINGS.GAMESPEED
+        if G.STATE == S.HAND_PLAYED or G.STATE == S.NEW_ROUND:
+            G.ACC = min((G.ACC or 0) + dt * 0.2 * speed, 16)
+        else:
+            G.ACC = 0
+        G.SPEEDFACTOR = speed if (G.STAGE_RUN and not paused) else 1
+        G.SPEEDFACTOR = G.SPEEDFACTOR + max(0, abs(G.ACC) - 2)
+        G.TIMERS["TOTAL"] = G.TIMERS["TOTAL"] + dt * G.SPEEDFACTOR
+        G.E_MANAGER.update(G.real_dt)
+        G.update_state()
+        # moveables: the hand slides, UI boxes chase their targets
+        G.exp_xy = math.exp(-50 * G.real_dt)
+        G.move_dt = min(1 / 20, G.real_dt)
+        G.max_vel = 70 * G.move_dt
+        if G.hand is not None:
+            move_hand(G)
+            for area in (G.jokers, G.deck, G.discard):
+                area.align_cards()
+        if not G.SETTINGS.paused:
+            for box in (G.shop, G.round_eval):
+                if box is not None and not box.removed:
+                    box.move()
+        # moveables: per-frame updates
+        for area in (G.hand, G.deck):
+            if area is not None:
+                area.update()
+        for c in list(G.I_CARD):
+            ab = c.ability
+            if ab.get("perma_debuff"):
+                c.debuff = True
+            if ab["name"] in UPDATE_NAMES:
+                c.update()
+        G.CONTROLLER.update()
+
+    def settled(self) -> bool:
+        return not self.CONTROLLER.locked and not self.E_MANAGER.busy() and self.STATE_COMPLETE
+
+    def settle(self, max_frames: int = 100000) -> int:
+        """Run frames until the game waits for the player (the same rule as
+        the oracle: 4 consecutive quiet frames).  Returns the frame count."""
+        G = self
+        G._idle = None  # the player may have changed anything
+        quiet = 0
+        for n in range(1, max_frames + 1):
+            # winning opens a pausing overlay: press 'Endless' like a player would
+            if G.SETTINGS.paused and G.OVERLAY_MENU and G.GAME.won and G.STATE != STATES.GAME_OVER:
+                G.exit_overlay_menu()
+            G.frame()
+            if G.STATE == STATES.GAME_OVER and G.STATE_COMPLETE:
+                return n  # the run is over (the game is paused for good)
+            if G.settled():
+                quiet += 1
+                if quiet >= 4:
+                    return n
+            else:
+                quiet = 0
+        raise RuntimeError("the game never settled")

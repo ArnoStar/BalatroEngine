@@ -155,22 +155,17 @@ class Analyzer:
 
     def _force_win(self) -> None:
         """Beat the current blind without playing a hand."""
-        G = self.G
-        assert G.STATE == G.STATES.SELECTING_HAND
-        G.GAME.chips = G.GAME.blind.chips
-        G.STATE = G.STATES.NEW_ROUND
-        G.STATE_COMPLETE = False
-        G.advance()
+        self.G.do({"cmd": "cheat", "win": True})
 
-    def _open_and_skip_pack(self, booster: Card) -> PackInfo:
+    def _open_and_skip_pack(self) -> PackInfo:
         G = self.G
+        booster = G.shop_booster.cards[0]
         info = PackInfo(key=booster.config.center.key, name=G.data.display_name(booster.config.center.key))
         self._money()
-        G.use_card(booster)
-        G.advance()
+        G.act_buy("shop_booster", 0)
         info.contents = [CardInfo.of(c) for c in (G.pack_cards.cards if G.pack_cards is not None else [])]
-        if G.in_pack():
-            G.skip_booster()
+        if G.can_skip_pack():
+            G.act_skip_pack()
         return info
 
     def _shop(self, blind_kind: str, rerolls: int, open_packs: bool) -> ShopInfo:
@@ -178,17 +173,17 @@ class Analyzer:
         vouchers = [CardInfo.of(c) for c in G.shop_vouchers.cards]
         packs = []
         if open_packs:
-            for booster in list(G.shop_booster.cards):
-                packs.append(self._open_and_skip_pack(booster))
+            for _ in range(len(G.shop_booster.cards)):
+                packs.append(self._open_and_skip_pack())
         else:
             packs = [PackInfo(key=c.config.center.key, name=G.data.display_name(c.config.center.key))
                      for c in G.shop_booster.cards]
         cards = [CardInfo.of(c) for c in G.shop_jokers.cards]
         for _ in range(rerolls):
             self._money()
-            G.reroll_shop()
+            G.act_reroll()
             cards.extend(CardInfo.of(c) for c in G.shop_jokers.cards)
-        G.toggle_shop()
+        G.act_end_shop()
         return ShopInfo(blind=blind_kind, cards=cards, vouchers=vouchers, packs=packs)
 
     def run(self, antes: int = 8, rerolls: int = 2, open_packs: bool = True, first_hands: bool = True) -> SeedReport:
@@ -219,14 +214,14 @@ class Analyzer:
                 binfo.tag_name = G.data.display_name(tkey) if tkey else None
                 if tkey == "tag_orbital":
                     binfo.orbital_hand = (G.GAME.orbital_choices or T()).get(ante, T()).get(kind)
-            G.select_blind()
+            G.act_select_blind()
             if first_hands:
                 binfo.first_hand = [card_label(c) for c in G.hand.cards]
             ante_info.blinds.append(binfo)
             self._force_win()
             if G.STATE != G.STATES.ROUND_EVAL:
                 break
-            G.cash_out()
+            G.act_cash_out()
             if G.STATE == G.STATES.SHOP:
                 ante_info.shops.append(self._shop(kind, rerolls, open_packs))
         return report

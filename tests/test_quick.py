@@ -27,5 +27,5 @@ def test_quick_matches_engine(deck):
         assert q.boss == rr.blind_choices.Boss, seed
         assert q.voucher == G.GAME.current_round.voucher, seed
         assert q.starting_deck() == [c.config.card_key for c in sorted(G.playing_cards, key=lambda c: c.sort_id)], seed
-        G.select_blind()
+        G.act_select_blind()
         assert sorted(q.first_hand()) == sorted(c.config.card_key for c in G.hand.cards), seed

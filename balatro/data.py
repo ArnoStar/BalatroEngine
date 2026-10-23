@@ -46,13 +46,21 @@ class GameData:
         self.poker_hand_names: dict[str, str] = raw["poker_hand_names"]
         # P_CARDS keys sorted the way pseudorandom_element sorts string keys
         self.P_CARDS_SORTED_KEYS = sorted(k for k in self.P_CARDS if k != "empty")
+        # the starting deck loop runs over pairs(G.P_CARDS); its order never
+        # matters (the result is sorted, erratic draws ignore the key)
+        self.P_CARDS_PAIRS_ORDER = list(self.P_CARDS_SORTED_KEYS)
+        self.P_CARD_KEY = {id(v): k for k, v in self.P_CARDS.items()}
+        # Card:update writes consumeable.mod_num into the shared center config
+        for v in self.P_CENTERS.values():
+            if v.consumeable and v.config and v.config.max_highlighted:
+                v.config.mod_num = min(5, v.config.max_highlighted)
         self.by_name: dict[str, list[str]] = {}
         for k, v in self.P_CENTERS.items():
             if v.name is not None:
                 self.by_name.setdefault(v.name, []).append(k)
 
     def center_by_name(self, name: str) -> T | None:
-        for k, v in self.P_CENTERS.items():
+        for v in self.P_CENTERS.values():
             if v.name == name:
                 return v
         return None

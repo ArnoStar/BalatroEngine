@@ -1,14 +1,41 @@
 [project]
 name = "balatroengine"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "A seed-exact re-implementation of Balatro's game logic (no UI)"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
+requires-python = ">=3.12"
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+]
+
+[dependency-groups]
+dev = [
     "mypy>=2.3.0",
+    "pytest>=8",
     "ruff>=0.16.1",
 ]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["balatro*"]
+
+[tool.setuptools.package-data]
+balatro = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: long differential fuzz runs against the original game"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+# the engine mirrors Lua tables (balatro.lua.T): attribute access on them is dynamic
+disable_error_code = ["misc"]

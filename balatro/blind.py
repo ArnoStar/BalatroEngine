@@ -1,15 +1,17 @@
-"""Port of blind.lua (logic only)."""
+"""Port of blind.lua (game logic and the events it queues)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .lua import T
+from .lua import T, lor, nonempty
 
 if TYPE_CHECKING:
     from .card import Card
-    from .cardarea import CardArea
     from .game import Game
+
+HAND_NAMES = ("Flush Five", "Flush House", "Five of a Kind", "Straight Flush", "Four of a Kind", "Full House",
+              "Flush", "Straight", "Three of a Kind", "Two Pair", "Pair", "High Card")
 
 
 class Blind:
@@ -17,60 +19,66 @@ class Blind:
         self.G = G
         self.config = T()
         self.chips = 0
-        self.name: str = ""
+        self.name: str | None = None
         self.dollars = 0
-        self.debuff = T()
+        self.debuff: T | None = None
+        self.sound_pings: int | None = None
+        self.blind_set = False
         self.mult = 0
         self.disabled = False
-        self.discards_sub = None
-        self.hands_sub = None
         self.boss = None
         self.triggered = None
         self.prepped = None
+        self.discards_sub = None
+        self.hands_sub = None
         self.hands: T | None = None
-        self.only_hand: Any = None
-
-    def __bool__(self) -> bool:  # G.GAME.blind is always a table in Lua
-        return True
+        self.only_hand = None
+        self.block_play = None
+        self.loc_debuff_text = ""
+        self.dissolve = None
 
     def __repr__(self) -> str:
-        return f"<Blind {self.name!r} chips={self.chips}>"
+        return f"<Blind {self.name}>"
 
-    def get_type(self) -> str | None:
-        if self.name == "Small Blind":
-            return "Small"
-        if self.name == "Big Blind":
-            return "Big"
-        if self.name:
-            return "Boss"
-        return None
-
-    def set_blind(self, blind: T | None, reset: Any = None, silent: Any = None) -> None:
+    # -------------------------------------------------------- set_blind
+    def set_blind(self, blind: T | None = None, reset: Any = None, silent: Any = None) -> None:
         G = self.G
         GAME = G.GAME
         if not reset:
-            self.config.blind = blind if blind is not None else T()
-            self.name = blind.name if blind is not None and blind.name else ""
-            self.dollars = blind.dollars if blind is not None and blind.dollars else 0
+            self.config.blind = blind or T()
+            self.name = blind.name if blind else ""
+            self.dollars = blind.dollars if blind else 0
+            self.sound_pings = self.dollars + 2
             if GAME.modifiers.no_blind_reward and GAME.modifiers.no_blind_reward.get(self.get_type()):
                 self.dollars = 0
-            self.debuff = blind.debuff if blind is not None and blind.debuff is not None else T()
-            self.mult = blind.mult if blind is not None and blind.mult else 0
+            self.debuff = (blind.debuff if blind else None) or T()
+            self.mult = (blind.mult if blind else None) or 0
             self.disabled = False
             self.discards_sub = None
             self.hands_sub = None
-            self.boss = bool(blind.boss) if blind is not None else None
+            self.boss = bool(blind and blind.boss)
+            self.blind_set = False
             self.triggered = None
             self.prepped = True
+            self.set_text()
             GAME.last_blind = GAME.last_blind or T()
             GAME.last_blind.boss = self.boss
             GAME.last_blind.name = self.name
             self.chips = G.get_blind_amount(GAME.round_resets.ante) * self.mult * GAME.starting_params.ante_scaling
-            if blind is None:
+            if not blind:
                 self.chips = 0
+            if blind and blind.name and blind.name != "":
+                self.alert_debuff(True)
+
+                def show() -> bool:
+                    def show2() -> None:
+                        self.blind_set = True
+                    G.ev(show2, trigger="after", delay=0.15, blockable=False)
+                    return True
+                G.event(show, trigger="after", delay=0.05, blockable=False)
         name = self.name
         if name == "The Eye" and not reset:
-            self.hands = T({h: False for h in G.data.handlist})
+            self.hands = T({h: False for h in HAND_NAMES})
         if name == "The Mouth" and not reset:
             self.only_hand = False
         if name == "The Fish" and not reset:
@@ -89,28 +97,84 @@ class Blind:
                 v.flip()
             if len(G.jokers.cards) > 1:
                 def shuffles() -> None:
-                    for _ in range(3):
-                        G.add_event(lambda: G.jokers.shuffle("aajk"))
-                G.add_event(shuffles)
-        for v in G.playing_cards:
+                    G.ev(lambda: G.jokers.shuffle("aajk"))
+                    G.delay(0.15)
+                    G.ev(lambda: G.jokers.shuffle("aajk"))
+                    G.delay(0.15)
+                    G.ev(lambda: G.jokers.shuffle("aajk"))
+                    G.delay(0.5)
+                G.ev(shuffles, trigger="after", delay=0.2)
+        for v in list(G.playing_cards):
             self.debuff_card(v)
-        for v in G.jokers.cards:
+        for v in list(G.jokers.cards):
             if not reset:
                 self.debuff_card(v, True)
 
+    def set_text(self) -> None:
+        """Only whether the debuff text is empty matters (it starts
+        alert_debuff): every boss has a description, Small/Big have none."""
+        if self.config.blind is not None:
+            if self.disabled:
+                self.loc_debuff_text = ""
+            else:
+                self.loc_debuff_text = "x" if self.config.blind.boss else ""
+
+    def alert_debuff(self, first: Any = None) -> None:
+        G = self.G
+        if self.loc_debuff_text and self.loc_debuff_text != "":
+            self.block_play = True
+
+            def wait() -> bool | None:
+                if self.disabled:
+                    self.block_play = None
+                    return True
+                if G.STATE == G.STATES.SELECTING_HAND:
+                    def alert() -> None:
+                        for i in range(1, 5):
+                            G.ev(None, blockable=False, trigger="after", delay=G.SETTINGS.GAMESPEED * (0.1 * (i - 1)))
+
+                        def unblock() -> None:
+                            self.block_play = None
+                        G.ev(unblock, trigger="after", delay=1, blocking=False, blockable=False)
+                    G.ev(alert, trigger="after", delay=G.SETTINGS.GAMESPEED * 0.05, blockable=False)
+                    return True
+                return None
+            G.event(wait, blockable=False, blocking=False)
+
+    # ------------------------------------------------------------ defeat
     def defeat(self, silent: Any = None) -> None:
         G = self.G
+        dissolve_time = 1.3
+        self.dissolve = 0
+        G.ev(None, trigger="after", blockable=False, delay=0.5 * dissolve_time)
+        if not silent:
+            pings = lor(self.sound_pings, 3)
+            for i in range(1, min(pings, 7) + 1):
+                G.ev(None, blockable=False, trigger="after", delay=(0.15 - 0.01 * pings) * i * dissolve_time)
+        G.ev(None, trigger="ease", blockable=False, delay=0.7 * dissolve_time)
+        G.ev(None, trigger="after", blockable=False, delay=0.8 * dissolve_time)
+
+        def finish() -> None:
+            self.dissolve = None
+            self.set_blind(None, None, True)
+        G.ev(finish, trigger="after", blockable=False, delay=0.95 * dissolve_time)
         for v in G.jokers.cards:
             if v.facing == "back":
                 v.flip()
         if self.name == "The Manacle" and not self.disabled:
             G.hand.change_size(1)
-        # the blind is reset ~1.2s later in a non-blockable event
-        G.defer(lambda: self.set_blind(None, None, True))
+
+    def get_type(self) -> str | None:
+        if self.name == "Small Blind":
+            return "Small"
+        if self.name == "Big Blind":
+            return "Big"
+        if self.name and self.name != "":
+            return "Boss"
+        return None
 
     def disable(self) -> None:
         G = self.G
-        GAME = G.GAME
         self.disabled = True
         for v in G.jokers.cards:
             if v.facing == "back":
@@ -138,16 +202,22 @@ class Blind:
             self.chips = self.chips / 3
 
         def check() -> None:
-            if self.boss and GAME.chips - GAME.blind.chips >= 0:
+            if self.boss and G.GAME.chips - G.GAME.blind.chips >= 0:
                 G.STATE = G.STATES.NEW_ROUND
                 G.STATE_COMPLETE = False
-        G.add_event(check)
-        for v in G.playing_cards:
+        G.ev(check)
+        for v in list(G.playing_cards):
             self.debuff_card(v)
-        for v in G.jokers.cards:
+        for v in list(G.jokers.cards):
             self.debuff_card(v)
+        self.set_text()
+        self.wiggle()
 
-    def press_play(self) -> Any:
+    def wiggle(self) -> None:
+        pass  # a non-blocking sound event
+
+    # ------------------------------------------------------------ playing
+    def press_play(self) -> bool | None:
         G = self.G
         if self.disabled:
             return None
@@ -158,16 +228,16 @@ class Blind:
                 cards = list(G.hand.cards)
                 for i in range(2):
                     if i < len(G.hand.cards):
-                        # pseudorandom_element sorts by sort_id but returns the original index
-                        order = sorted(range(len(cards)), key=lambda j: cards[j].sort_id)
-                        pick = order[G.rng.element_index(len(order), G.rng.pseudoseed("hook"))]
-                        G.hand.add_to_highlighted(cards[pick], True)
-                        del cards[pick]
+                        k = G.random_card_index(cards, "hook")
+                        selected = cards[k]
+                        G.hand.add_to_highlighted(selected, True)
+                        del cards[k]
                         any_selected = True
                 if any_selected:
                     G.discard_cards_from_highlighted(None, True)
-            G.add_event(hook)
+            G.ev(hook)
             self.triggered = True
+            G.delay(0.7)
             return True
         if name == "Crimson Heart":
             if G.jokers.cards:
@@ -178,29 +248,32 @@ class Blind:
         if name == "The Tooth":
             def tooth() -> None:
                 for _ in range(len(G.play.cards)):
+                    G.ev(None)
                     G.ease_dollars(-1)
-            G.add_event(tooth)
+                    G.delay(0.23)
+            G.ev(tooth, trigger="after", delay=0.2)
             self.triggered = True
             return True
         return None
 
-    def modify_hand(self, cards: list, poker_hands: Any, text: str, mult: float, hand_chips: float) -> tuple[float, float, bool]:
-        import math
+    def modify_hand(self, cards: list["Card"], poker_hands: T, text: str, mult: float, hand_chips: float
+                    ) -> tuple[float, float, bool]:
         if self.disabled:
             return mult, hand_chips, False
         if self.name == "The Flint":
             self.triggered = True
-            return max(math.floor(mult * 0.5 + 0.5), 1), max(math.floor(hand_chips * 0.5 + 0.5), 0), True
+            G = self.G
+            return max(G.floor(mult * 0.5 + 0.5), 1), max(G.floor(hand_chips * 0.5 + 0.5), 0), True
         return mult, hand_chips, False
 
-    def debuff_hand(self, cards: list, hand: Any, handname: str, check: Any = None) -> bool | None:
+    def debuff_hand(self, cards: list["Card"], hand: T, handname: str, check: Any = None) -> bool | None:
         G = self.G
         if self.disabled:
             return None
         if self.debuff is not None:
             self.triggered = False
             d = self.debuff
-            if d.hand and hand[d.hand]:
+            if d.hand and nonempty(hand[d.hand]):
                 self.triggered = True
                 return True
             if d.h_size_ge and len(cards) < d.h_size_ge:
@@ -227,39 +300,41 @@ class Blind:
                 self.triggered = True
                 if not check:
                     G.level_up_hand(None, handname, None, -1)
+                    self.wiggle()
         if self.name == "The Ox":
             self.triggered = False
             if handname == G.GAME.current_round.most_played_poker_hand:
                 self.triggered = True
                 if not check:
                     G.ease_dollars(-G.GAME.dollars, True)
+                    self.wiggle()
         return None
 
     def drawn_to_hand(self) -> None:
         G = self.G
         if not self.disabled:
             if self.name == "Cerulean Bell":
-                any_forced = any(v.ability.forced_selection for v in G.hand.cards)
-                if not any_forced:
+                if not any(v.ability.forced_selection for v in G.hand.cards):
                     G.hand.unhighlight_all()
-                    forced = G._random_card_from(G.hand.cards, "cerulean_bell")
+                    forced = G.random_card_from(list(G.hand.cards), "cerulean_bell")
                     forced.ability.forced_selection = True
                     G.hand.add_to_highlighted(forced)
             if self.name == "Crimson Heart" and self.prepped and G.jokers.cards:
                 jokers = []
-                for c in G.jokers.cards:
-                    if not c.debuff or len(G.jokers.cards) < 2:
+                n = len(G.jokers.cards)
+                for c in list(G.jokers.cards):
+                    if not c.debuff or n < 2:
                         jokers.append(c)
                     c.set_debuff(False)
                 if jokers:
-                    card = G._random_card_from(jokers, "crimson_heart")
+                    card = G.random_card_from(jokers, "crimson_heart")
                     card.set_debuff(True)
+                    self.wiggle()
                 else:
-                    # pseudorandom_element on an empty table still advances the stream
                     G.rng.pseudoseed("crimson_heart")
         self.prepped = None
 
-    def stay_flipped(self, area: "CardArea", card: "Card") -> bool | None:
+    def stay_flipped(self, area: Any, card: "Card") -> bool | None:
         G = self.G
         if not self.disabled:
             if area is G.hand:
