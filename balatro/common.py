@@ -23,6 +23,44 @@ if TYPE_CHECKING:
 UNAVAILABLE = "UNAVAILABLE"
 
 
+def status_text_info(card: Any, eval_type: str, amt: Any, extra: T | None) -> dict[str, Any]:
+    """What a card_eval_status_text pop-up says, as data: the card it shows on,
+    the effect (chips, mult, x_mult, dollars, debuffed, swap or message) and
+    its amount."""
+    if extra and extra.focus:
+        card = extra.focus
+    info: dict[str, Any] = {"card": getattr(card, "sort_id", None)}
+    if eval_type == "debuff":
+        info["effect"] = "debuffed"
+    elif eval_type in ("chips", "mult", "x_mult", "dollars", "swap"):
+        info["effect"] = eval_type
+        info["amount"] = amt
+    elif eval_type == "h_mult":
+        info["effect"] = "mult"
+        info["amount"] = amt
+        info["held"] = True
+    else:  # 'extra' / 'jokers': the message a joker, seal or edition returned
+        ex = extra or T()
+        x = ex.Xmult_mod or ex.x_mult_mod
+        if x:
+            info["effect"], info["amount"] = "x_mult", x
+        elif ex.mult_mod:
+            info["effect"], info["amount"] = "mult", ex.mult_mod
+        elif ex.chip_mod:
+            info["effect"], info["amount"] = "chips", ex.chip_mod
+        elif ex.dollars:
+            info["effect"], info["amount"] = "dollars", ex.dollars
+        else:
+            info["effect"] = "message"
+            if isinstance(ex.message, str) and ex.message != "msg":
+                info["message"] = ex.message
+        if ex.repetitions:
+            info["effect"] = "again"
+        if ex.edition:
+            info["edition"] = True
+    return info
+
+
 class CommonMixin:
     # ===================================================== event shorthands
     def event(self: "Game", func: Callable[..., Any] | None = None, **kw: Any) -> None:
@@ -50,11 +88,34 @@ class CommonMixin:
     def floor(x: float) -> float:
         return floor(x)
 
+    # ======================================================= player feedback
+    def start_feedback(self: "Game") -> list[dict]:
+        """Start recording what the game shows the player (status texts, the
+        scoring panel, money, cards moving), in the order and at the time the
+        game shows it.  Returns the list that fills up; ``t`` is the real time
+        in seconds since this call.  Recording never changes the run."""
+        self.feedback = []
+        self._feedback_t0 = self.TIMERS["REAL"]
+        return self.feedback
+
+    def stop_feedback(self: "Game") -> list[dict]:
+        fb = self.feedback or []
+        self.feedback = None
+        return fb
+
+    def _feedback(self: "Game", kind: str, **data: Any) -> None:
+        fb = self.feedback
+        if fb is not None:
+            data["type"] = kind
+            data["t"] = round(self.TIMERS["REAL"] - self._feedback_t0, 4)
+            fb.append(data)
+
     # ============================================================== easing
     def ease_chips(self: "Game", mod: float) -> None:
         G = self
 
         def f() -> None:
+            G._feedback("round_score", chips=mod or 0)
             G.event(floor, trigger="ease", blockable=False, ref_table=G.GAME, ref_value="chips", ease_to=mod or 0,
                     delay=0.3)
         G.ev(f)
@@ -64,6 +125,7 @@ class CommonMixin:
 
         def _mod() -> None:
             G.GAME.dollars = G.GAME.dollars + (mod or 0)
+            G._feedback("dollars", amount=mod or 0, total=G.GAME.dollars)
         if instant:
             _mod()
         else:
@@ -140,7 +202,7 @@ class CommonMixin:
 
     def play_area_status_text(self: "Game", text: str, silent: Any = None, delay: float | None = None) -> None:
         d = lor(delay, 0.6)
-        self.ev(None, trigger="immediate" if d == 0 else "before", delay=d)
+        self.ev(lambda: self._feedback("status_text", text=text), trigger="immediate" if d == 0 else "before", delay=d)
 
     def juice_card(self: "Game", card: Card) -> None:
         self.ev(None)
@@ -177,6 +239,9 @@ class CommonMixin:
                 ch.chip_total = vals.chip_total
             if vals.level is not None:
                 ch.hand_level = vals.level
+            if G.feedback is not None:
+                G._feedback("hand", **{k: vals.get(k) for k in ("handname", "level", "chips", "mult", "chip_total")
+                                       if vals.get(k) is not None})
         G.ev(f, trigger="before", blockable=not config.immediate, delay=lor(config.delay, 0.8))
 
     def card_eval_status_text(self: "Game", card: Any, eval_type: str, amt: Any = None, percent: Any = None,
@@ -193,8 +258,13 @@ class CommonMixin:
             amt = 1
         d = d * 1.25
         if amt is not None and (amt > 0 or amt < 0):
-            if not (extra and extra.instant):
-                G.ev(None, trigger="before", delay=d)
+            def show() -> None:
+                if G.feedback is not None:
+                    G._feedback("card_text", **status_text_info(card, eval_type, amt, extra))
+            if extra and extra.instant:
+                show()
+            else:
+                G.ev(show, trigger="before", delay=d)
         if extra and extra.playing_cards_created:
             G.playing_card_joker_effects(extra.playing_cards_created)
 

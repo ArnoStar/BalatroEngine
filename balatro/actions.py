@@ -75,6 +75,44 @@ class ActionsMixin:
         finally:
             hand.highlighted = saved
 
+    def preview_hand(self: "Game", idxs: Iterable[int]) -> dict[str, Any]:
+        """What the game shows while these hand cards are selected, without
+        changing anything: the poker hand, its level, chips and mult, the
+        scoring cards (hand indices) and whether the boss blind forbids the
+        hand.  Forced cards (Cerulean Bell) count as selected.  A face-down
+        card in the selection hides the hand, as in the game ('????')."""
+        G = self
+        G._require(G.STATE == G.STATES.SELECTING_HAND and G.hand is not None, "not selecting a hand")
+        idxs = list(idxs)
+        hand = G.hand
+        for i in idxs:
+            G._require(isinstance(i, int) and 0 <= i < len(hand.cards), f"no card at hand[{i}]")
+        G._require(len(set(idxs)) == len(idxs), "a card is selected twice")
+        forced = {id(c) for c in hand.highlighted if c.ability.forced_selection}
+        n = len(forced | {id(hand.cards[i]) for i in idxs})
+        G._require(n <= hand.config.highlighted_limit, f"at most {hand.config.highlighted_limit} cards can be selected")
+        blind = G.GAME.blind
+        with G._hypothetical_selection(idxs):
+            sel = list(hand.highlighted)
+            saved = (blind.triggered, G.boss_throw_hand) if blind else None
+            try:
+                text, disp, poker_hands, scoring, _ = G.get_poker_hand_info(sel)
+                not_allowed = bool(text != "NULL" and blind and blind.debuff_hand(sel, poker_hands, text, True))
+            finally:
+                if blind and saved:
+                    blind.triggered, G.boss_throw_hand = saved
+        out: dict[str, Any] = {"selected": [hand.cards.index(c) for c in sel], "hand": None, "level": None,
+                               "chips": None, "mult": None, "scoring": [], "not_allowed": False, "hidden": False}
+        if text == "NULL":
+            return out
+        if any(c.facing == "back" for c in sel):
+            out["hidden"] = True
+            return out
+        h = G.GAME.hands[text]
+        out.update(hand=text, display=disp, level=h.level, chips=h.chips, mult=h.mult,
+                   scoring=[hand.cards.index(c) for c in scoring], not_allowed=not_allowed)
+        return out
+
     def in_pack(self: "Game") -> bool:
         return self.STATE in PACK_STATES
 

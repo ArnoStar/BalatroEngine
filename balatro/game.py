@@ -220,6 +220,9 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         self.last_score: T | None = None
         self.last_scoring: T | None = None
         self.round_eval_rows: list | None = None
+        # what the game shows the player, while recording (start_feedback)
+        self.feedback: list[dict] | None = None
+        self._feedback_t0 = 0.0
 
     # ------------------------------------------------------------ helpers
     def is_unlocked(self, center: T) -> bool:

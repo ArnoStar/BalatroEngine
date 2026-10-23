@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from balatro.game import Game  # noqa: E402
 from balatro.oracle import Oracle, diff, normalize  # noqa: E402
-from balatro.oracle.fuzz import best_play  # noqa: E402
+from balatro.oracle.fuzz import best_play, fit  # noqa: E402
 
 
 def J(*keys: str) -> list[dict]:
@@ -83,14 +83,14 @@ def choose(G: Game, policy: str, step: int) -> dict:
                 if t is None or G.can_use(a["index"], t):
                     return {"cmd": "use", "index": a["index"], "targets": t}
         if policy == "discard1" and "discard" in cmds:
-            return {"cmd": "discard", "cards": [step % n]}
+            return {"cmd": "discard", "cards": fit(G, [step % n])}
         if policy == "mixed" and "discard" in cmds and step % 3 == 0:
-            return {"cmd": "discard", "cards": list(range(min(3, n)))}
+            return {"cmd": "discard", "cards": fit(G, list(range(min(3, n))))}
         if policy == "single" and step % 2 == 0:
-            return {"cmd": "play", "cards": [n - 1]}
+            return {"cmd": "play", "cards": fit(G, [n - 1])}
         if policy == "glass" and step % 2 == 0:
-            return {"cmd": "play", "cards": [0, 1]}
-        return {"cmd": "play", "cards": best_play(G)}
+            return {"cmd": "play", "cards": fit(G, [0, 1])}
+        return {"cmd": "play", "cards": fit(G, best_play(G))}
     if st == S.ROUND_EVAL:
         return {"cmd": "cash_out"}
     if G.in_shop():

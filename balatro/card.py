@@ -894,6 +894,8 @@ class Card:
         elif self.facing == "back":
             self.ability.wheel_flipped = None
             self.facing = "front"
+        if self.G.feedback is not None:
+            self.G._feedback("card_flipped", card=self.sort_id, facing=self.facing)
 
     def highlight(self, is_highlighted: bool) -> None:
         G = self.G
@@ -910,6 +912,8 @@ class Card:
         G = self.G
         self.removed = True
         self.REMOVED = True
+        if G.feedback is not None and self.area is not None:
+            G._feedback("card_removed", card=self.sort_id, area=self.area.name)
         if self.area is not None:
             self.area.remove_card(self)
         self.remove_from_deck()

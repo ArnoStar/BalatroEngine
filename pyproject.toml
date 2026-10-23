@@ -1,6 +1,6 @@
 [project]
 name = "balatroengine"
-version = "0.2.0"
+version = "0.3.0"
 description = "A seed-exact re-implementation of Balatro's game logic (no UI)"
 readme = "README.md"
 requires-python = ">=3.12"

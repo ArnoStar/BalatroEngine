@@ -709,15 +709,17 @@ class StateEventsMixin:
                     status(j, "jokers", None, None, None, eff.jokers)
 
         score = G.floor(hand_chips * mult)
+        round_score = GAME.chips + score
 
         def total() -> None:
+            G._feedback("hand_scored", hand=text, chips=hand_chips, mult=mult, score=score, round_score=round_score)
             uht(T(delay=0, immediate=True), T(mult=0, chips=0, chip_total=score, level="", handname=""))
         G.ev(total, trigger="after", delay=0.4)
         G.last_score = T(chips=hand_chips, mult=mult, score=score, hand=text)
         if hand_chips * mult > 0:
             G.delay(0.8)
             G.ev(None)
-        G.event(G.floor, trigger="ease", blocking=False, ref_table=GAME, ref_value="chips", ease_to=GAME.chips + score,
+        G.event(G.floor, trigger="ease", blocking=False, ref_table=GAME, ref_value="chips", ease_to=round_score,
                 delay=0.5)
         G.event(G.floor, trigger="ease", blocking=True, ref_table=GAME.current_round.current_hand,
                 ref_value="chip_total", ease_to=0, delay=0.5)

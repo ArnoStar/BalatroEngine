@@ -48,6 +48,8 @@ class CardArea:
             if self is G.deck:
                 self.config.card_limit = len(self.cards)
         card.area = self
+        if G.feedback is not None:
+            G._feedback("card_moved", card=card.sort_id, to=self.name)
         self.align_cards()
         if self is G.jokers:
             tally = sum(1 for c in self.cards if c.ability.set == "Joker")

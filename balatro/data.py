@@ -15,6 +15,7 @@ from typing import Any
 from .lua import T, to_T
 
 DATA_FILE = Path(__file__).with_name("data") / "game_data.json"
+SPRITES_FILE = Path(__file__).with_name("data") / "sprites.json"
 
 
 class GameData:
@@ -82,3 +83,13 @@ class GameData:
 def load(path: str | None = None) -> GameData:
     p = Path(path) if path else DATA_FILE
     return GameData(json.loads(p.read_text()))
+
+
+@lru_cache(maxsize=1)
+def sprites() -> dict[str, Any]:
+    """Where the game draws each card, blind, tag, seal and sticker in its
+    sprite sheets (tools/lua/extract_sprites.lua): ``atlases`` (sheet file
+    and cell size) and, per key, the atlas and the cell position.  For front
+    ends that use the game's own textures; the engine itself never needs it."""
+    return json.loads(SPRITES_FILE.read_text())
+
