@@ -259,6 +259,9 @@ The oracle needs `luajit` and the game's extracted Lua source, either in
 
 ## Tests
 
+`make test`, `make test-all`, `make lint`, `make check` and `make build`
+wrap the commands below (`make` lists them).
+
 ```
 python -m pytest              # unit tests; the oracle tests run if luajit and the game source are present
 python -m pytest -m slow      # a short differential fuzz run
