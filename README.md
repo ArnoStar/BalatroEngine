@@ -269,6 +269,23 @@ python -m pytest -m slow      # a short differential fuzz run
 complete final state, so it checks the engine against the game without
 needing LuaJIT.
 
+## CI and releases
+
+`.github/workflows/ci-cd.yml` runs on every push and pull request (`main`,
+`dev`):
+
+- the tests (`-m "not slow"`) on Python 3.12 and 3.13. The oracle tests are
+  skipped there, since CI has no game source, but the golden runs still run;
+- `ruff check` (pyflakes and syntax errors, set in `pyproject.toml`);
+- the package build, checking that the wheel includes `balatro/data`.
+
+To release, run the oracle tests locally first. Then set `version` in
+`pyproject.toml`, commit, and push a tag `v<version>`
+(`git tag v0.4.0 && git push origin v0.4.0`). The workflow checks that the tag
+matches the version, and publishes a GitHub release with the wheel and the
+source archive. BalatroWebAPI then moves to the new tag (its
+`[tool.uv.sources]`, then `uv lock`).
+
 ## Legal
 
 Balatro is © LocalThunk (published by Playstack). This is an unofficial fan

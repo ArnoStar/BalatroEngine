@@ -34,6 +34,12 @@ markers = ["slow: long differential fuzz runs against the original game"]
 [tool.ruff]
 line-length = 140
 
+[tool.ruff.lint]
+# pyflakes and the syntax/statement errors (ruff's classic set). The engine
+# mirrors the game's Lua line by line, so style rules that would rewrite it
+# (comprehensions, collapsed ifs ...) are not applied.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
