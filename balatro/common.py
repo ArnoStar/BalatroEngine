@@ -22,6 +22,27 @@ if TYPE_CHECKING:
 
 UNAVAILABLE = "UNAVAILABLE"
 
+# G.PROFILES[...].career_stats and the high scores a run can set (game.lua:init_item_prototypes)
+CAREER_STATS = ("c_round_interest_cap_streak", "c_dollars_earned", "c_shop_dollars_spent", "c_tarots_bought",
+                "c_planets_bought", "c_playing_cards_bought", "c_vouchers_bought", "c_tarot_reading_used",
+                "c_planetarium_used", "c_shop_rerolls", "c_cards_played", "c_cards_discarded", "c_losses", "c_wins",
+                "c_rounds", "c_hands_played", "c_face_cards_played", "c_jokers_sold", "c_cards_sold",
+                "c_single_hand_round_streak")
+HIGH_SCORES = ("hand", "furthest_round", "furthest_ante", "most_money", "boss_streak")
+
+
+def new_run_profile() -> T:
+    """What a run adds to the player's profile: the parts of the game's
+    ``G.PROFILES[G.SETTINGS.profile]`` that playing changes (career stats,
+    high scores, joker and voucher usage), starting from a blank profile.
+
+    The game only records these for unseeded runs that aren't challenges.
+    The engine records them for every run, as an unseeded run would, and
+    whoever keeps the player's profile decides which runs count.  The win
+    streaks span runs, so they are left to that keeper too."""
+    return T(career_stats=T({k: 0 for k in CAREER_STATS}), high_scores=T({k: 0 for k in HIGH_SCORES}),
+             joker_usage=T(), voucher_usage=T())
+
 
 def status_text_info(card: Any, eval_type: str, amt: Any, extra: T | None) -> dict[str, Any]:
     """What a card_eval_status_text pop-up says, as data: the card it shows on,
@@ -124,7 +145,10 @@ class CommonMixin:
         G = self
 
         def _mod() -> None:
+            if not (mod or 0) < 0:
+                G.inc_career_stat("c_dollars_earned", mod)
             G.GAME.dollars = G.GAME.dollars + (mod or 0)
+            G.check_and_set_high_score("most_money", G.GAME.dollars)
             G._feedback("dollars", amount=mod or 0, total=G.GAME.dollars)
         if instant:
             _mod()
@@ -160,6 +184,7 @@ class CommonMixin:
 
         def f() -> None:
             G.GAME.round_resets.ante = G.GAME.round_resets.ante + (mod or 0)
+            G.check_and_set_high_score("furthest_ante", G.GAME.round_resets.ante)
         G.ev(f)
 
     def ease_round(self: "Game", mod: int) -> None:
@@ -167,6 +192,8 @@ class CommonMixin:
 
         def f() -> None:
             G.GAME.round = G.GAME.round + (mod or 0)
+            G.check_and_set_high_score("furthest_round", G.GAME.round)
+            G.check_and_set_high_score("furthest_ante", G.GAME.round_resets.ante)
         G.ev(f)
 
     # ===================================================== card movement
@@ -371,6 +398,58 @@ class CommonMixin:
     def refresh_all_costs(self: "Game") -> None:
         for v in list(self.I_CARD):
             v.set_cost()
+
+    # ================================================== the player's profile
+    def inc_career_stat(self: "Game", stat: str, mod: float | None = None) -> None:
+        cs = self.PROFILE.career_stats
+        cs[stat] = (cs.get(stat) or 0) + (mod or 0)
+
+    def check_and_set_high_score(self: "Game", score: str, amt: Any) -> None:
+        """The run's round score (shown at the end of the run) and its high
+        score.  (The game also flags a new profile high score; the engine
+        doesn't know the player's profile.)"""
+        if not isinstance(amt, (int, float)) or isinstance(amt, bool):
+            return
+        amt = floor(amt)
+        rs = self.GAME.round_scores.get(score)
+        if rs and amt > rs.amt:
+            rs.amt = amt
+        hs = self.PROFILE.high_scores
+        if score in hs and amt > hs[score]:
+            hs[score] = amt
+
+    def set_joker_usage(self: "Game") -> None:
+        u = self.PROFILE.joker_usage
+        for v in self.jokers.cards:
+            key = v.config.center_key
+            if key and v.ability.set == "Joker":
+                if u.get(key):
+                    u[key].count = u[key].count + 1
+                else:
+                    u[key] = T(count=1, wins=T(), losses=T())
+
+    def _joker_result(self: "Game", result: str) -> None:
+        u = self.PROFILE.joker_usage
+        stake = self.GAME.stake
+        for v in self.jokers.cards:
+            key = v.config.center_key
+            if key and v.ability.set == "Joker":
+                if result == "wins" and not u.get(key):
+                    u[key] = T(count=1, wins=T(), losses=T())
+                if u.get(key):
+                    u[key][result][stake] = (u[key][result].get(stake) or 0) + 1
+
+    def set_joker_win(self: "Game") -> None:
+        self._joker_result("wins")
+
+    def set_joker_loss(self: "Game") -> None:
+        self._joker_result("losses")
+
+    def set_voucher_usage(self: "Game", card: Card) -> None:
+        key = card.config.center_key
+        if key and card.ability.set == "Voucher":
+            u = self.PROFILE.voucher_usage
+            u[key] = (u.get(key) or 0) + 1
 
     def set_consumeable_usage(self: "Game", card: Card) -> None:
         G = self

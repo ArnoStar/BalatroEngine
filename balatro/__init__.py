@@ -3,6 +3,6 @@
 from .actions import IllegalAction
 from .game import DECK_NAMES, STAKE_NAMES, STATE_NAMES, STATES, Game, Profile
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = ["Game", "Profile", "IllegalAction", "STATES", "STATE_NAMES", "DECK_NAMES", "STAKE_NAMES"]

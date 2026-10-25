@@ -81,6 +81,8 @@ class StateEventsMixin:
     # =============================================================== win
     def win_game(self: "Game") -> None:
         G = self
+        G.set_joker_win()
+        G.inc_career_stat("c_wins", 1)
 
         def pause() -> None:
             G.SETTINGS.paused = True
@@ -130,6 +132,14 @@ class StateEventsMixin:
                         played = v.played
                         handname = k
                 GAME.current_round.most_played_poker_hand = handname
+            if GAME.blind.get_type() == "Boss":
+                GAME.current_boss_streak = GAME.current_boss_streak + 1
+                G.check_and_set_high_score("boss_streak", GAME.current_boss_streak)
+            if GAME.current_round.hands_played == 1:
+                G.inc_career_stat("c_single_hand_round_streak", 1)
+            else:
+                G.PROFILE.career_stats.c_single_hand_round_streak = 0
+            G.set_joker_usage()
             if game_won and not GAME.win_notified:
                 GAME.win_notified = True
 
@@ -292,6 +302,7 @@ class StateEventsMixin:
         if count > 0:
             G.update_hand_text(T(immediate=True, nopulse=True, delay=0), T(mult=0, chips=0, level="", handname=""))
             G.hand.highlighted.sort(key=lambda c: G.hand.index(c))
+            G.inc_career_stat("c_cards_discarded", count)
             hl = G.hand.highlighted
             for j in list(G.jokers.cards):
                 j.calculate_joker(T(pre_discard=True, full_hand=hl, hook=hook))
@@ -347,12 +358,16 @@ class StateEventsMixin:
             G.STATE = G.STATES.HAND_PLAYED
             G.STATE_COMPLETE = True
         G.ev(ev0)
+        G.inc_career_stat("c_cards_played", len(G.hand.highlighted))
+        G.inc_career_stat("c_hands_played", 1)
         G.ease_hands_played(-1)
         G.delay(0.4)
         hl = G.hand.highlighted
         n = len(hl)
         for i in range(n):
             c = hl[i]
+            if c.is_face():
+                G.inc_career_stat("c_face_cards_played", 1)
             c.base.times_played = c.base.times_played + 1
             c.ability.played_this_ante = True
             GAME.round_scores.cards_played.amt = GAME.round_scores.cards_played.amt + 1
@@ -715,6 +730,7 @@ class StateEventsMixin:
             G._feedback("hand_scored", hand=text, chips=hand_chips, mult=mult, score=score, round_score=round_score)
             uht(T(delay=0, immediate=True), T(mult=0, chips=0, chip_total=score, level="", handname=""))
         G.ev(total, trigger="after", delay=0.4)
+        G.check_and_set_high_score("hand", hand_chips * mult)
         G.last_score = T(chips=hand_chips, mult=mult, score=score, hand=text)
         if hand_chips * mult > 0:
             G.delay(0.8)
@@ -782,6 +798,11 @@ class StateEventsMixin:
         if GAME.dollars >= 5 and not GAME.modifiers.no_interest:
             v = GAME.interest_amount * min(math.floor(GAME.dollars / 5), GAME.interest_cap / 5)
             G.add_round_eval_row(T(bonus=True, name="interest", dollars=v))
+            cs = G.PROFILE.career_stats
+            if v == GAME.interest_amount * GAME.interest_cap / 5:
+                cs.c_round_interest_cap_streak = cs.c_round_interest_cap_streak + 1
+            else:
+                cs.c_round_interest_cap_streak = 0
             rows.append(("interest", v))
             dollars = dollars + v
         G.add_round_eval_row(T(name="bottom", dollars=dollars))

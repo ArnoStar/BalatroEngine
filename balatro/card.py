@@ -620,6 +620,9 @@ class Card:
             G.ease_dollars(self.sell_cost)
             self.start_dissolve()
             G.delay(0.3)
+            G.inc_career_stat("c_cards_sold", 1)
+            if self.ability.set == "Joker":
+                G.inc_career_stat("c_jokers_sold", 1)
             if self.ability.set == "Joker" and G.GAME.blind and G.GAME.blind.name == "Verdant Leaf":
                 G.ev(G.GAME.blind.disable)
 
@@ -666,7 +669,7 @@ class Card:
         GAME.pack_size = self.ability.extra
         GAME.pack_choices = self.config.center.config.choose or 1
         if self.cost > 0:
-            G.ev(None, trigger="after", delay=0.2)
+            G.ev(lambda: G.inc_career_stat("c_shop_dollars_spent", self.cost), trigger="after", delay=0.2)
             G.ease_dollars(-self.cost)
         else:
             G.delay(0.2)
@@ -751,6 +754,9 @@ class Card:
         GAME.used_vouchers[self.config.center_key] = True
         G.ev(None, trigger="after", delay=0.4)
         G.ease_dollars(-self.cost)
+        G.inc_career_stat("c_shop_dollars_spent", self.cost)
+        G.inc_career_stat("c_vouchers_bought", 1)
+        G.set_voucher_usage(self)
         GAME.current_round.voucher = None
         self.apply_to_run()
         G.delay(0.6)

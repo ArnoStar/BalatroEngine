@@ -32,7 +32,7 @@ from balatro import Game, Profile, IllegalAction, STATES, STATE_NAMES, DECK_NAME
 | `STATE_NAMES` | state value → name (`{1: 'SELECTING_HAND', ...}`) |
 | `DECK_NAMES` | short deck names → keys: `{'red': 'b_red', ..., 'erratic': 'b_erratic', 'challenge': 'b_challenge'}` |
 | `STAKE_NAMES` | stake names → levels: `{'white': 1, 'red': 2, 'green': 3, 'black': 4, 'blue': 5, 'purple': 6, 'orange': 7, 'gold': 8}` |
-| `__version__` | the engine version (`"0.3.0"`) |
+| `__version__` | the engine version (`"0.4.0"`) |
 
 ### `Profile`
 
@@ -79,7 +79,7 @@ which hand is there. The default is `DEFAULT_HANDS_ORDER` (`balatro.game`).
 the first decision, the blind select screen. It returns `self`.
 
 Attributes set at creation: `seed`, `deck_key`, `stake`, `challenge_id`,
-`data` (the [`GameData`](#balatrodata)), `profile`, `SETTINGS.GAMESPEED`.
+`data` (the [`GameData`](#balatrodata)), `profile`, `PROFILE` (what the run adds to the player's profile, see [state reference](state-reference.md#what-a-run-adds-to-the-profile-gprofile)), `SETTINGS.GAMESPEED`.
 
 ### Actions
 

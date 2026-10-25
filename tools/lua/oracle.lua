@@ -29,6 +29,98 @@ local function fmt(x)
   return string.format('%.17g', x)
 end
 
+-- ------------------------------------------------------------ the profile
+-- What the run adds to the player's profile, recorded as for an unseeded run
+-- that isn't a challenge (the engine's G.PROFILE): the profile starts blank
+-- at each run, and the game's "not seeded" checks around the stats are
+-- skipped.  Nothing here changes the game.
+local CAREER, HIGH = {}, { 'hand', 'furthest_round', 'furthest_ante', 'most_money', 'boss_streak' }
+
+local function profile() return G.PROFILES[G.SETTINGS.profile] end
+
+local function reset_profile()
+  local p = profile()
+  for k in pairs(p.career_stats) do p.career_stats[k] = 0 end
+  for _, k in ipairs(HIGH) do p.high_scores[k].amt = 0 end
+  p.joker_usage, p.voucher_usage = {}, {}
+end
+
+local function unseeded() return G.GAME.seeded or G.GAME.challenge end
+
+function inc_career_stat(stat, mod)
+  local cs = profile().career_stats
+  cs[stat] = (cs[stat] or 0) + (mod or 0)
+end
+
+function check_and_set_high_score(score, amt)
+  if not amt or type(amt) ~= 'number' then return end
+  if G.GAME.round_scores[score] and math.floor(amt) > G.GAME.round_scores[score].amt then
+    G.GAME.round_scores[score].amt = math.floor(amt)
+  end
+  local hs = profile().high_scores[score]
+  if hs and math.floor(amt) > hs.amt then hs.amt = math.floor(amt) end
+end
+
+local orig_win_game = win_game
+function win_game()
+  if unseeded() then
+    set_joker_win()
+    inc_career_stat('c_wins', 1)
+  end
+  return orig_win_game()
+end
+
+-- called once per won round, right after the boss streak and the single
+-- hand streak (which the game only keeps for unseeded runs)
+local orig_set_joker_usage = set_joker_usage
+function set_joker_usage()
+  if unseeded() then
+    if G.GAME.blind:get_type() == 'Boss' then
+      G.GAME.current_boss_streak = G.GAME.current_boss_streak + 1
+      check_and_set_high_score('boss_streak', G.GAME.current_boss_streak)
+    end
+    if G.GAME.current_round.hands_played ~= 1 then profile().career_stats.c_single_hand_round_streak = 0 end
+  end
+  return orig_set_joker_usage()
+end
+
+local orig_add_round_eval_row = add_round_eval_row
+function add_round_eval_row(config)
+  if config.name == 'interest' and unseeded() then
+    local cs = profile().career_stats
+    if G.GAME.interest_amount*math.min(math.floor(G.GAME.dollars/5), G.GAME.interest_cap/5) == G.GAME.interest_amount*G.GAME.interest_cap/5 then
+      cs.c_round_interest_cap_streak = cs.c_round_interest_cap_streak + 1
+    else
+      cs.c_round_interest_cap_streak = 0
+    end
+  end
+  return orig_add_round_eval_row(config)
+end
+
+local orig_update_game_over = Game.update_game_over
+function Game:update_game_over(dt)
+  if not G.STATE_COMPLETE and G.GAME.round_resets.ante <= G.GAME.win_ante and unseeded() then
+    inc_career_stat('c_losses', 1)
+    set_joker_loss()
+  end
+  return orig_update_game_over(self, dt)
+end
+
+local function profile_dump()
+  local p = profile()
+  local out = { career_stats = {}, high_scores = {}, joker_usage = {}, voucher_usage = {} }
+  for k, v in pairs(p.career_stats) do out.career_stats[k] = v end
+  for _, k in ipairs(HIGH) do out.high_scores[k] = fmt(p.high_scores[k].amt) end
+  for k, v in pairs(p.joker_usage) do
+    local u = { count = v.count, wins = {}, losses = {} }
+    for st, n in pairs(v.wins or {}) do u.wins[tostring(st)] = n end
+    for st, n in pairs(v.losses or {}) do u.losses[tostring(st)] = n end
+    out.joker_usage[k] = u
+  end
+  for k, v in pairs(p.voucher_usage) do out.voucher_usage[k] = v.count end
+  return out
+end
+
 local function card_desc(c)
   local d = {
     key = c.config.center.key,
@@ -128,7 +220,10 @@ local function dump()
     },
     rng = {},
     hands_order = hands_order(),
+    round_scores = {},
+    profile = profile_dump(),
   }
+  for k, v in pairs(GAME.round_scores) do s.round_scores[k] = fmt(v.amt) end
   for i, t in ipairs(GAME.tags) do s.tags[i] = t.key end
   for k, v in pairs(GAME.hands) do
     s.hands[k] = { level = v.level, played = v.played, chips = v.chips, mult = v.mult, visible = v.visible }
@@ -203,6 +298,7 @@ function handlers.start(cmd)
   G.E_MANAGER.queue_last_processed = 0
   G.ACC = 0
   G.last_materialized = nil
+  reset_profile()
   boot.start_run({ seed = cmd.seed, deck = cmd.deck or 'Red Deck', stake = cmd.stake or 1, challenge = cmd.challenge })
 end
 
