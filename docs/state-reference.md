@@ -155,6 +155,32 @@ The run state (`Game:init_game_object()`). The fields most used:
 | `ability.orbital_hand` | an Orbital Tag's hand |
 | `ID` | creation counter |
 
+## What a run adds to the profile (`G.PROFILE`)
+
+The game keeps a profile per player (`G.PROFILES[G.SETTINGS.profile]`):
+career stats, high scores, and how often each joker and voucher was used.
+`G.PROFILE` is the part of it this run adds, starting from a blank profile,
+written by the game's own functions at the same places (`inc_career_stat`,
+`check_and_set_high_score`, `set_joker_usage`, `set_joker_win`,
+`set_joker_loss`, `set_voucher_usage`). Nothing in the game reads it.
+
+| Field | |
+|---|---|
+| `career_stats` | `{c_cards_played: n, c_dollars_earned: n, ...}`: the game's 20 career stats (`balatro.common.CAREER_STATS`). The two streaks (`c_single_hand_round_streak`, `c_round_interest_cap_streak`) span runs in the game; here they start at 0 |
+| `high_scores` | `{hand, furthest_round, furthest_ante, most_money, boss_streak}`: the run's best |
+| `joker_usage` | `{key: {count, wins: {stake: n}, losses: {stake: n}}}`: `count` = won rounds the joker was held in; wins and losses = copies held when the run was won or lost |
+| `voucher_usage` | `{key: times redeemed}` |
+
+The game only records these for an unseeded run that isn't a challenge. The
+engine's runs all behave as seeded runs (nothing is unlocked), but `PROFILE` is
+recorded as for an unseeded run, every time: whoever keeps the player's profile
+decides which runs count. For the same reason `GAME.current_boss_streak` counts
+as in an unseeded run. The win streaks, which span runs, are left to that keeper.
+`check_and_set_high_score` also raises `GAME.round_scores` (as the game does,
+seeded or not). The oracle records the same (`profile` in its dump, with the
+game's "seeded" checks around the stats skipped), so it is verified like the
+rest of the state.
+
 ## Snapshot
 
 `G.snapshot()` returns the state as plain JSON-able data. It is the format of
@@ -177,6 +203,8 @@ compare exactly.
 | `current_round` | `{idol, mail, ancient, castle, most_played, dollars}` |
 | `rng` | every RNG stream: `{key: value}` |
 | `hands_order` | the `pairs(G.GAME.hands)` order in use |
+| `round_scores` | `{name: amt}`: the run's scores the game shows when it ends (best hand, cards played, ...) |
+| `profile` | `G.PROFILE` (below): `{career_stats, high_scores, joker_usage: {key: {count, wins, losses}}, voucher_usage}` |
 
 A card is `{key, sort_id, card?, perma_bonus?, edition?, seal?, debuff?,
 facing?, eternal?, perishable?, rental?, forced?, highlighted?, cost,

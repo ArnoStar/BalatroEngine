@@ -124,6 +124,10 @@ class ButtonsMixin:
                                 bpo.py = None
                             G.GAME.pack_choices = G.GAME.pack_choices - 1
                         else:
+                            if prev_state == S.TAROT_PACK:
+                                G.inc_career_stat("c_tarot_reading_used", 1)
+                            if prev_state == S.PLANET_PACK:
+                                G.inc_career_stat("c_planetarium_used", 1)
                             G.end_consumeable(None, delay_fac)
                     else:
                         for box in (G.shop, G.blind_select, G.round_eval):
@@ -166,6 +170,7 @@ class ButtonsMixin:
             c1.area.remove_card(c1)
             c1.add_to_deck()
             if c1.ability.set in ("Default", "Enhanced"):
+                G.inc_career_stat("c_playing_cards_bought", 1)
                 G.playing_card = (G.playing_card + 1) if G.playing_card else 1
                 G.deck.emplace(c1)
                 c1.playing_card = G.playing_card
@@ -178,13 +183,19 @@ class ButtonsMixin:
                     G.jokers.emplace(c1)
                 G.ev(lambda: c1.calculate_joker(T(buying_card=True, card=c1)))
             G.GAME.round_scores.cards_purchased.amt = G.GAME.round_scores.cards_purchased.amt + 1
-            if not c1.ability.consumeable and c1.ability.set == "Joker":
+            if c1.ability.consumeable:
+                if c1.config.center.set == "Planet":
+                    G.inc_career_stat("c_planets_bought", 1)
+                elif c1.config.center.set == "Tarot":
+                    G.inc_career_stat("c_tarots_bought", 1)
+            elif c1.ability.set == "Joker":
                 G.GAME.current_round.jokers_purchased = G.GAME.current_round.jokers_purchased + 1
             for j in list(G.jokers.cards):
                 j.calculate_joker(T(buying_card=True, card=c1))
             if G.GAME.modifiers.inflation:
                 G.GAME.inflation = G.GAME.inflation + 1
                 G.ev(G.refresh_all_costs)
+            G.inc_career_stat("c_shop_dollars_spent", c1.cost)
             if c1.cost != 0:
                 G.ease_dollars(-c1.cost)
             if buy_and_use:
@@ -220,6 +231,8 @@ class ButtonsMixin:
         G.stop_use()
         G.CONTROLLER.locks.shop_reroll = True
         if GAME.current_round.reroll_cost > 0:
+            G.inc_career_stat("c_shop_dollars_spent", GAME.current_round.reroll_cost)
+            G.inc_career_stat("c_shop_rerolls", 1)
             G.ease_dollars(-GAME.current_round.reroll_cost)
 
         def reroll() -> None:
@@ -259,6 +272,7 @@ class ButtonsMixin:
 
             def go() -> None:
                 G.ease_round(1)
+                G.inc_career_stat("c_rounds", 1)
                 GAME.round_resets.blind = blind
                 GAME.round_resets.blind_states[GAME.blind_on_deck] = "Current"
                 G.blind_select.remove()

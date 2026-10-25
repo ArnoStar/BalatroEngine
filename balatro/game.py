@@ -23,7 +23,7 @@ from .buttons import ButtonsMixin
 from .card import _UPDATE_NAMES as UPDATE_NAMES
 from .card import Card
 from .cardarea import CardArea
-from .common import CommonMixin
+from .common import CommonMixin, new_run_profile
 from .events import EventManager
 from .lua import T, copy_table, to_T
 from .rng import SEED_ALPHABET, PseudoRandom, lua_tostring, normalize_seed
@@ -146,6 +146,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         self.P_CARD_KEY = d.P_CARD_KEY
         self.handlist = d.handlist
         self.profile = profile or Profile.everything()
+        self.PROFILE = new_run_profile()
         self._hands_order = list(hands_order) if hands_order is not None else list(DEFAULT_HANDS_ORDER)
 
         if seed is None:  # like an unseeded run: a fresh random seed (8 characters)
@@ -453,6 +454,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         for p in protos:
             G.card_from_control(p)
         GAME.starting_deck_size = len(G.playing_cards)
+        G.check_and_set_high_score("most_money", GAME.dollars)
 
         G.delay(0.5)
         GAME.current_round.discards_left = rr.discards
@@ -722,6 +724,9 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
     def update_game_over(self) -> None:
         G = self
         if not G.STATE_COMPLETE:
+            if G.GAME.round_resets.ante <= G.GAME.win_ante:
+                G.inc_career_stat("c_losses", 1)
+                G.set_joker_loss()
             G.SETTINGS.paused = True
             G.overlay_menu()
             G.STATE_COMPLETE = True

@@ -119,4 +119,18 @@ def snapshot(G: "Game") -> dict:
         },
         "rng": {k: fmt(v) for k, v in G.rng.state.items()},
         "hands_order": list(G.hands_order()),
+        "round_scores": {k: fmt(v.amt) for k, v in GAME.round_scores.items()},
+        "profile": profile_desc(G.PROFILE),
+    }
+
+
+def profile_desc(p: Any) -> dict:
+    """What the run added to the player's profile (Game.PROFILE)."""
+    return {
+        "career_stats": dict(p.career_stats),
+        "high_scores": {k: fmt(v) for k, v in p.high_scores.items()},
+        "joker_usage": {k: {"count": v.count, "wins": {str(s): n for s, n in v.wins.items()},
+                            "losses": {str(s): n for s, n in v.losses.items()}}
+                        for k, v in p.joker_usage.items()},
+        "voucher_usage": dict(p.voucher_usage),
     }
