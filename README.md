@@ -112,6 +112,7 @@ them changes the run.
   | `card_juiced` | `card` | a card wiggling: the joker that made a scored or held card's effect |
   | `card_changed` | `card`, `change` (`edition`, `seal`) | a card shining with its new edition or seal (Aura, Hex, Déjà Vu...) |
   | `attention_text` | `card`, `key` (localization key: `k_nope_ex`) | a big text over a card (The Wheel of Fortune's "Nope!") |
+  | `card_unlocked` | `key`, `set` | the "Unlocked!" notification (an unseeded run, `seeded=False`) |
 
   `card` is the card's `sort_id`, which never changes during a run.
 - **The hand being selected.** `G.preview_hand(cards)` gives what the game
@@ -235,11 +236,21 @@ The oracle needs `luajit` and the game's extracted Lua source, either in
 
 ## Exactness notes and known limits
 
-- **Profile.** A seeded run never unlocks or discovers anything, so the
-  profile is fixed for the whole run. The default, `Profile.everything()`
-  (everything unlocked), is the seed-finder convention. `Profile.fresh()`
-  models a new save, where locked jokers and vouchers are left out of the
-  pools.
+- **Profile and unlocks.** What is unlocked and discovered changes the
+  pools (locked jokers and vouchers are left out; some tags need a discovered
+  edition or joker). The default, `Profile.everything()`, is the seed-finder
+  convention; `Profile.fresh()` is a new save. A seeded run (the default,
+  `seeded=True`) never unlocks or discovers anything, as in the game. With
+  `Game(..., seeded=False)` the run unlocks and discovers as an unseeded run
+  does (progress.py: `check_for_unlock`, `unlock_card`, `discover_card` at
+  the game's places), so new unlocks enter the pools for the rest of the run;
+  `G.PROFILE.progress` lists them, and the oracle checks them
+  (`python -m balatro.oracle.fuzz --profile fresh --unlocks`). The checks the
+  game makes on the main menu (career stats, discovered blinds) are
+  `Profile.with_main_menu_unlocks()`, for between runs. Continuing a run from
+  the main menu is the `{"cmd": "continue"}` command (it can unlock
+  Throwback). Ties in the order of locked items with the same `order` may
+  differ from LuaJIT's sort; only nested unlocks within one check could tell.
 - **To Do List, Orbital Tag hand, The Ox tie-break.** These depend on the
   order of `pairs(G.GAME.hands)`, which follows LuaJIT's string hashes. Those
   hashes use a random seed per process, so the order changes every time the
@@ -255,10 +266,10 @@ The oracle needs `luajit` and the game's extracted Lua source, either in
   and suit by the game's internal UI node counter. The engine uses creation
   order instead. They differ only for cards whose suit was changed by a Tarot,
   and only very late in a run.
-- **Not modelled.** Unseeded runs (`Game()` with no seed picks a random seed
-  but plays it as a seeded run, where nothing gets unlocked or discovered),
-  the game's own save and continue (use `clone()`), the tutorial (seed
-  `TUTORIAL`), and actions taken while an animation is still running.
+- **Not modelled.** The game's own save and continue (use `clone()`; the
+  `continue` command has the one effect continuing has on a run), the
+  achievements, the tutorial (seed `TUTORIAL`), and actions taken while an
+  animation is still running.
 
 ## Tests
 
@@ -287,7 +298,7 @@ needing LuaJIT.
 
 To release, run the oracle tests locally first. Then set `version` in
 `pyproject.toml`, commit, and push a tag `v<version>`
-(`git tag v0.4.2 && git push origin v0.4.2`). The workflow checks that the tag
+(`git tag v0.5.0 && git push origin v0.5.0`). The workflow checks that the tag
 matches the version, and publishes a GitHub release with the wheel and the
 source archive. BalatroWebAPI then moves to the new tag (its
 `[tool.uv.sources]`, then `uv lock`).

@@ -16,6 +16,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 
+from .lua import T
+
 if TYPE_CHECKING:
     from .card import Card
     from .cardarea import CardArea
@@ -466,6 +468,8 @@ class ActionsMixin:
             self.act_sort(cmd.get("mode", "rank"))
         elif c == "state":
             pass
+        elif c == "continue":  # the player continues the run from the main menu (Game:start_run with a save)
+            self.check_for_unlock(T(type="continue_game"))
         elif c == "cheat":  # test helpers (no RNG involved)
             if cmd.get("dollars") is not None:
                 self.GAME.dollars = cmd["dollars"]

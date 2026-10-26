@@ -139,7 +139,7 @@ def run_one(oracle: Oracle, seed: str, deck: str, stake: int, rnd: random.Random
     g0 = Game("X")
     G = Game(seed, deck=g0.data.center_by_name(deck).key if not challenge else "b_red", stake=start["stake"],
              challenge=challenge, hands_order=r["state"]["hands_order"], game_speed=opts.gamespeed,
-             profile=Profile.fresh() if opts.profile == "fresh" else None).start_run()
+             profile=Profile.fresh() if opts.profile == "fresh" else None, seeded=not opts.unlocks).start_run()
 
     def fail(msg: list[str]) -> dict:
         result.update(ok=False, diff=msg)
@@ -159,6 +159,8 @@ def run_one(oracle: Oracle, seed: str, deck: str, stake: int, rnd: random.Random
         cmd: dict | None = None
         if pending:
             cmd = pending.pop(0)
+        elif opts.unlocks and rnd.random() < 0.01:
+            cmd = {"cmd": "continue"}
         elif G.STATE == G.STATES.SHOP and last_state != G.STATES.SHOP:
             if rnd.random() < opts.money_prob:
                 cmd = {"cmd": "cheat", "dollars": G.GAME.dollars + rnd.randint(10, 60)}
@@ -219,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sweep-offset", type=int, default=0)
     ap.add_argument("--sweep-step", type=int, default=1)
     ap.add_argument("--profile", choices=["all", "fresh"], default="all")
+    ap.add_argument("--unlocks", action="store_true",
+                    help="runs unlock and discover as unseeded runs do (use with --profile fresh)")
     ap.add_argument("--gamespeed", type=float, default=1, help="the game speed setting (0.5, 1, 2, 4)")
     ap.add_argument("--out", default=None, help="append failures (json lines) here")
     ap.add_argument("--record", default=None, help="append passing runs (log + the game's final state) here")
@@ -227,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     g0 = Game("X")
     fails = 0
     done = 0
-    with Oracle(profile=opts.profile, gamespeed=opts.gamespeed) as oracle:
+    with Oracle(profile=opts.profile, gamespeed=opts.gamespeed, unlocks=opts.unlocks) as oracle:
         for n in range(opts.runs):
             seed = "".join(rnd.choice(SEED_CHARS) for _ in range(8))
             deck = opts.deck or rnd.choice(DECKS)

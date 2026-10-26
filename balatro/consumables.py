@@ -299,6 +299,7 @@ def use_consumeable(self: "Card", area: Any, copier: "Card | None" = None) -> No
                 else:
                     edition = G.poll_edition("wheel_of_fortune", None, True, True)
                 eligible.set_edition(edition, True)
+                G.check_for_unlock(T(type="have_edition"))
                 if name == "Hex":
                     first = None
                     for v in list(G.jokers.cards):

@@ -66,7 +66,7 @@ class ButtonsMixin:
             card.area.remove_card(card)
         if card.ability.consumeable:
             if G.STATE in (S.TAROT_PACK, S.PLANET_PACK, S.SPECTRAL_PACK):
-                pass
+                G.discover_card(card.config.center)
             else:
                 G.draw_card(G.hand, G.play, 1, "up", True, card, None, mute)
             G.delay(0.2)

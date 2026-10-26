@@ -121,12 +121,17 @@ class Card:
             self.base.suit_nominal_original = snno or s[1]
         if not initial:
             G.GAME.blind.debuff_card(self)
+        if self.playing_card and not initial:
+            G.check_for_unlock(T(type="modify_deck"))
 
     # ---------------------------------------------------------- set_ability
     def set_ability(self, center: T, initial: bool = False, delay_sprites: bool = False) -> None:
         G = self.G
         self.config.center = center
         self.config.center_key = center.key
+        if self.params.get("discover") and not G.is_discovered(center.key):
+            G.unlock_card(center)
+            G.discover_card(center)
         if delay_sprites:
             G.ev(lambda: None)
         cfg = center.config
@@ -146,6 +151,8 @@ class Card:
             self.ability.consumeable = cfg  # a reference, as in the game
         ab = self.ability
         name = ab.name
+        if name == "Gold Card" and self.seal == "Gold" and self.playing_card:
+            G.check_for_unlock(T(type="double_gold"))
         if name == "Invisible Joker":
             ab.invis_rounds = 0
         if name == "To Do List":
@@ -169,8 +176,14 @@ class Card:
         if not G.OVERLAY_MENU:
             for k in G.data.by_name.get(name, ()):
                 G.GAME.used_jokers[k] = True
+        if G.jokers is not None and self.area is G.jokers:
+            G.check_for_unlock(T(type="modify_jokers"))
+        if G.consumeables is not None and self.area is G.consumeables:
+            G.check_for_unlock(T(type="modify_jokers"))
         if not initial:
             G.GAME.blind.debuff_card(self)
+        if self.playing_card and not initial:
+            G.check_for_unlock(T(type="modify_deck"))
 
     # ------------------------------------------------------------- set_cost
     def set_cost(self) -> None:
@@ -197,7 +210,7 @@ class Card:
     def set_edition(self, edition: Any, immediate: Any = None, silent: Any = None) -> None:
         G = self.G
         self.edition = None
-        if not edition:
+        if edition is None or edition is False:  # (an empty table goes on, as in Lua)
             return
         P = G.P_CENTERS
         if edition.get("holo"):
@@ -214,6 +227,8 @@ class Card:
                 else:
                     G.jokers.config.card_limit += 1
             self.edition = T(negative=True, type="negative")
+        if self.area is not None and self.area is G.jokers:
+            G.discover_card(P["e_" + self.edition.type] if self.edition else P["e_base"])
         if self.edition and not silent:
             G.CONTROLLER.locks.edition = True
 
@@ -226,6 +241,8 @@ class Card:
             def unlock() -> None:
                 G.CONTROLLER.locks.edition = False
             G.ev(unlock, trigger="after", delay=0.1)
+        if G.jokers is not None and self.area is G.jokers:
+            G.check_for_unlock(T(type="modify_jokers"))
         self.set_cost()
 
     # ------------------------------------------------------------- set_seal
@@ -247,6 +264,8 @@ class Card:
                     def unlock() -> None:
                         G.CONTROLLER.locks.seal = False
                     G.ev(unlock, trigger="after", delay=0.15)
+        if self.ability.name == "Gold Card" and self.seal == "Gold" and self.playing_card:
+            G.check_for_unlock(T(type="double_gold"))
         self.set_cost()
 
     def get_seal(self, bypass_debuff: bool = False) -> str | None:
@@ -294,12 +313,16 @@ class Card:
     # ---------------------------------------------------------- deck in/out
     def add_to_deck(self, from_debuff: bool = False) -> None:
         G = self.G
+        G.discover_card(self.config.center)
         if self.added_to_deck:
             return
         self.added_to_deck = True
         ab = self.ability
         if ab.set in ("Enhanced", "Default"):
+            if ab.name == "Gold Card" and self.seal == "Gold" and self.playing_card:
+                G.check_for_unlock(T(type="double_gold"))
             return
+        G.discover_card(G.P_CENTERS["e_" + self.edition.type] if self.edition else G.P_CENTERS["e_base"])
         name = ab.name
         GAME = G.GAME
         if ab.h_size != 0:
@@ -663,6 +686,7 @@ class Card:
         G.stop_use()
         G.STATE_COMPLETE = False
         self.opening = True
+        G.discover_card(self.config.center)
         name = self.ability.name
         if "Arcana" in name:
             G.STATE = S.TAROT_PACK
@@ -757,6 +781,7 @@ class Card:
             return
         GAME = G.GAME
         G.stop_use()
+        G.discover_card(self.config.center)
         if self.shop_voucher:
             GAME.current_round.voucher = None
         GAME.used_vouchers[self.config.center_key] = True
@@ -765,6 +790,7 @@ class Card:
         G.inc_career_stat("c_shop_dollars_spent", self.cost)
         G.inc_career_stat("c_vouchers_bought", 1)
         G.set_voucher_usage(self)
+        G.check_for_unlock(T(type="run_redeem"))
         GAME.current_round.voucher = None
         self.apply_to_run()
         G.delay(0.6)
@@ -1012,6 +1038,8 @@ def apply_to_run(G: "Game", self: Card | None, center: T | None = None) -> None:
     if name in ("Wasteful", "Recyclomancy"):
         GAME.round_resets.discards = GAME.round_resets.discards + extra
         G.ease_discard(extra)
+    if name == "Blank":
+        G.check_for_unlock(T(type="blank_redeems"))
     if name == "Antimatter":
         def f9() -> None:
             if G.jokers is not None:

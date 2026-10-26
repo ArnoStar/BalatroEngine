@@ -26,6 +26,7 @@ from .cardarea import CardArea
 from .common import CommonMixin, new_run_profile
 from .events import EventManager
 from .lua import T, copy_table, to_T
+from .progress import Profile, ProgressMixin
 from .rng import SEED_ALPHABET, PseudoRandom, lua_tostring, normalize_seed
 from .state_events import StateEventsMixin
 from .ui import HAND_H, ROOM_Y, TILE_H, Box, move_hand
@@ -81,32 +82,6 @@ def _num(x: float) -> str:
     return str(int(x)) if isinstance(x, float) and x.is_integer() and abs(x) < 1e15 else str(x)
 
 
-class Profile:
-    """Which centers are unlocked/discovered (this changes the pools).
-
-    Seed finders assume everything is unlocked; :meth:`fresh` is a brand new
-    save.  A seeded run never unlocks or discovers anything, so the profile
-    stays fixed for the whole run.
-    """
-
-    def __init__(self, unlocked: set[str] | None = None, discovered: set[str] | None = None, all_: bool = True) -> None:
-        self.all = all_
-        self.unlocked = unlocked or set()
-        self.discovered = discovered or set()
-
-    @classmethod
-    def everything(cls) -> "Profile":
-        return cls(all_=True)
-
-    @classmethod
-    def fresh(cls) -> "Profile":
-        d = data_mod.load()
-        unlocked = {k for k, v in d.P_CENTERS.items() if v.unlocked is not False}
-        discovered = {k for k, v in d.P_CENTERS.items() if v.discovered}
-        discovered |= {k for k, v in d.P_TAGS.items() if v.discovered}
-        return cls(unlocked, discovered, all_=False)
-
-
 class Controller:
     """The parts of engine/controller.lua the logic reads: the locks."""
 
@@ -122,19 +97,25 @@ class Controller:
         self.locked = any(bool(v) for v in self.locks.values())
 
 
-class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
+class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMixin):
     """A Balatro run.
 
     ``Game(seed, deck, stake, challenge=None)`` (no seed: a random one); call
     :meth:`start_run`, then play it with the ``act_*`` methods (actions.py).
-    The run behaves as a seeded run: nothing gets unlocked or discovered.
+
+    ``profile`` is the player's progress (default: everything unlocked).
+    ``seeded`` says whether the player chose the seed (the game's
+    G.GAME.seeded): only an unseeded run that isn't a challenge unlocks and
+    discovers things, as in the game (progress.py), changing the pools for the
+    rest of the run; ``G.PROFILE.progress`` lists what it unlocked.
     """
 
     STATES = STATES
 
     def __init__(self, seed: str | None = None, deck: str = "b_red", stake: int | str = 1, challenge: str | None = None,
                  profile: Profile | None = None, hands_order: Iterable[str] | None = None,
-                 game_speed: float = 1, normalize: bool = True, fast_forward: bool = True) -> None:
+                 game_speed: float = 1, normalize: bool = True, fast_forward: bool = True,
+                 seeded: bool = True) -> None:
         self.data = d = data_mod.load()
         self.P_CENTERS = d.P_CENTERS
         self.P_CARDS = d.P_CARDS
@@ -145,8 +126,11 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         self.P_JOKER_RARITY_POOLS = d.P_JOKER_RARITY_POOLS
         self.P_CARD_KEY = d.P_CARD_KEY
         self.handlist = d.handlist
-        self.profile = profile or Profile.everything()
+        self.profile = (profile or Profile.everything()).copy()
         self.PROFILE = new_run_profile()
+        self.seeded = seeded
+        self.unlocking = not seeded and challenge is None
+        self.P_LOCKED: list[T] = []
         self._hands_order = list(hands_order) if hands_order is not None else list(DEFAULT_HANDS_ORDER)
 
         if seed is None:  # like an unseeded run: a fresh random seed (8 characters)
@@ -295,7 +279,8 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
 
         Static prototype tables are shared, everything else is copied, so the
         copy continues exactly like the original would."""
-        memo: dict[int, Any] = {id(self.data): self.data, id(self.profile): self.profile}
+        # (the profile is the run's own: an unseeded run changes it, so it is copied too)
+        memo: dict[int, Any] = {id(self.data): self.data}
         d = self.data
         for table in (d.P_CENTERS, d.P_CARDS, d.P_BLINDS, d.P_TAGS, d.P_SEALS, d.P_STAKES):
             memo[id(table)] = table
@@ -357,6 +342,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         the first decision (the blind select screen)."""
         G = self
         GAME = G.GAME
+        G._start_progress()
         challenge = G.data.challenge(G.challenge_id) if G.challenge_id else None
         if challenge is not None and challenge.deck and challenge.deck.type:
             back_center = G.data.center_by_name(challenge.deck.type)
@@ -398,7 +384,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         rr.reroll_cost = GAME.base_reroll_cost
         GAME.current_round.reroll_cost = GAME.base_reroll_cost
 
-        GAME.seeded = True
+        GAME.seeded = G.seeded
         GAME.pseudorandom = G.rng.state
         rr.blind_tags = rr.blind_tags or T()
         rr.blind_choices.Boss = G.get_new_boss()
@@ -726,6 +712,8 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin):
         if not G.STATE_COMPLETE:
             if G.GAME.round_resets.ante <= G.GAME.win_ante:
                 G.inc_career_stat("c_losses", 1)
+                if G.unlocking:
+                    G.set_deck_loss()
                 G.set_joker_loss()
             G.SETTINGS.paused = True
             G.overlay_menu()

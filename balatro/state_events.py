@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
-from .lua import T, nonempty
+from .lua import T, floor, nonempty
 from .poker import get_poker_hand_info
 from .rng import lua_tostring
 
@@ -82,6 +82,10 @@ class StateEventsMixin:
     def win_game(self: "Game") -> None:
         G = self
         G.set_joker_win()
+        if G.unlocking:
+            G.set_deck_win()
+            for kind in ("win_no_hand", "win_no", "win_custom", "win_deck", "win_stake", "win"):
+                G.check_for_unlock(T(type=kind))
         G.inc_career_stat("c_wins", 1)
 
         def pause() -> None:
@@ -124,6 +128,8 @@ class StateEventsMixin:
                 G.STATE_COMPLETE = False
                 return
             GAME.unused_discards = (GAME.unused_discards or 0) + GAME.current_round.discards_left
+            if GAME.blind and GAME.blind.config.blind:
+                G.discover_card(GAME.blind.config.blind)
             if GAME.blind.get_type() == "Boss":
                 handname, played, order = "High Card", -1, 100
                 for k in G.hands_order():
@@ -138,7 +144,8 @@ class StateEventsMixin:
             if GAME.current_round.hands_played == 1:
                 G.inc_career_stat("c_single_hand_round_streak", 1)
             else:
-                G.PROFILE.career_stats.c_single_hand_round_streak = 0
+                G.set_streak("c_single_hand_round_streak", 0)
+            G.check_for_unlock(T(type="round_win"))
             G.set_joker_usage()
             if game_won and not GAME.win_notified:
                 GAME.win_notified = True
@@ -195,6 +202,7 @@ class StateEventsMixin:
                 G.delay(0.4)
                 G.ease_ante(1)
                 G.delay(0.4)
+                G.check_for_unlock(T(type="ante_up", ante=GAME.round_resets.ante + 1))
             G.draw_from_discard_to_deck()
 
             def ev2() -> None:
@@ -332,6 +340,7 @@ class StateEventsMixin:
                 for j in list(G.jokers.cards):
                     eval_card(G, j, T(cardarea=G.jokers, remove_playing_cards=True, removed=destroyed))
             GAME.round_scores.cards_discarded.amt = GAME.round_scores.cards_discarded.amt + len(cards)
+            G.check_for_unlock(T(type="discard_custom", cards=cards))
             if not hook:
                 if GAME.modifiers.discard_cost:
                     G.ease_dollars(-GAME.modifiers.discard_cost)
@@ -372,14 +381,17 @@ class StateEventsMixin:
             c.ability.played_this_ante = True
             GAME.round_scores.cards_played.amt = GAME.round_scores.cards_played.amt + 1
             G.draw_card(G.hand, G.play, (i + 1) * 100 / n, "up", None, c)
+        G.check_for_unlock(T(type="run_card_replays"))
         if GAME.blind.press_play():
             G.ev(None)
             G.delay(0.4)
 
         def ev1() -> None:
+            G.check_for_unlock(T(type="hand_contents", cards=G.play.cards))
             G.ev(G.evaluate_play)
 
             def ev2() -> None:
+                G.check_for_unlock(T(type="play_all_hearts"))
                 G.draw_from_play_to_discard()
                 GAME.hands_played = GAME.hands_played + 1
                 GAME.current_round.hands_played = GAME.current_round.hands_played + 1
@@ -473,6 +485,8 @@ class StateEventsMixin:
         if not GAME.blind.debuff_hand(G.play.cards, poker_hands, text):
             mult = mod_mult(hand.mult)
             hand_chips = mod_chips(G, hand.chips)
+            G.check_for_unlock(T(type="hand", handname=text, disp_text=non_loc, scoring_hand=scoring_hand,
+                                 full_hand=G.play.cards))
             G.delay(0.4)
             if GAME.first_used_hand_level and GAME.first_used_hand_level > 0:
                 G.level_up_hand(G.deck.cards[0] if G.deck.cards else None, text, None, GAME.first_used_hand_level)
@@ -731,6 +745,7 @@ class StateEventsMixin:
             uht(T(delay=0, immediate=True), T(mult=0, chips=0, chip_total=score, level="", handname=""))
         G.ev(total, trigger="after", delay=0.4)
         G.check_and_set_high_score("hand", hand_chips * mult)
+        G.check_for_unlock(T(type="chip_score", chips=floor(hand_chips * mult)))
         G.last_score = T(chips=hand_chips, mult=mult, score=score, hand=text)
         if hand_chips * mult > 0:
             G.delay(0.8)
@@ -798,11 +813,11 @@ class StateEventsMixin:
         if GAME.dollars >= 5 and not GAME.modifiers.no_interest:
             v = GAME.interest_amount * min(math.floor(GAME.dollars / 5), GAME.interest_cap / 5)
             G.add_round_eval_row(T(bonus=True, name="interest", dollars=v))
-            cs = G.PROFILE.career_stats
             if v == GAME.interest_amount * GAME.interest_cap / 5:
-                cs.c_round_interest_cap_streak = cs.c_round_interest_cap_streak + 1
+                G.inc_career_stat("c_round_interest_cap_streak", 1)
             else:
-                cs.c_round_interest_cap_streak = 0
+                G.set_streak("c_round_interest_cap_streak", 0)
+            G.check_for_unlock(T(type="interest_streak"))
             rows.append(("interest", v))
             dollars = dollars + v
         G.add_round_eval_row(T(name="bottom", dollars=dollars))
