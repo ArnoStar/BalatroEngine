@@ -32,19 +32,27 @@ from balatro import Game, Profile, IllegalAction, STATES, STATE_NAMES, DECK_NAME
 | `STATE_NAMES` | state value → name (`{1: 'SELECTING_HAND', ...}`) |
 | `DECK_NAMES` | short deck names → keys: `{'red': 'b_red', ..., 'erratic': 'b_erratic', 'challenge': 'b_challenge'}` |
 | `STAKE_NAMES` | stake names → levels: `{'white': 1, 'red': 2, 'green': 3, 'black': 4, 'blue': 5, 'purple': 6, 'orange': 7, 'gold': 8}` |
-| `__version__` | the engine version (`"0.4.2"`) |
+| `__version__` | the engine version (`"0.5.0"`) |
 
 ### `Profile`
 
-What the player has unlocked and discovered. A seeded run never unlocks or
-discovers anything, so the profile is fixed for the whole run. It matters
-because locked items are left out of the shop and pack pools.
+The player's progress: what is unlocked and discovered (locked items are
+left out of the shop and pack pools), and the cumulative parts the unlock
+conditions read. A run works on its own copy (`G.profile`); an unseeded run
+(`seeded=False`) changes it as the game does, a seeded run or a challenge
+doesn't.
 
 | | |
 |---|---|
 | `Profile.everything()` | everything unlocked and discovered (the default, and the seed finders' convention) |
 | `Profile.fresh()` | a new save: only what the game unlocks from the start |
-| `Profile(unlocked=set_of_keys, discovered=set_of_keys, all_=False)` | a specific save |
+| `Profile(unlocked, discovered, all_=False, career_stats, deck_usage, voucher_usage, challenges_completed)` | a specific save. `deck_usage`: `{deck: {"wins": {stake: n}, "losses": {stake: n}}}` |
+| `to_json()`, `Profile.from_json(d)` | a JSON form (`{"all": true}` for everything) |
+| `with_main_menu_unlocks()` | the profile after the main menu's unlock checks (career stats, discovered blinds), which the game makes between runs |
+| `deck_win_stake(deck=None)` | `get_deck_win_stake`: the highest stake won with the deck (any deck) |
+| `max_stake(deck)` | the highest stake the run setup offers with the deck (won + 1) |
+| `challenges_unlocked(total)` | how many challenges are open (none until 5 decks have a win, then 5 more than those completed) |
+| `is_unlocked(key)` | |
 
 ---
 
@@ -54,7 +62,7 @@ because locked items are left out of the shop and pack pools.
 
 ```python
 Game(seed=None, deck="b_red", stake=1, challenge=None, profile=None, hands_order=None,
-     game_speed=1, normalize=True, fast_forward=True)
+     game_speed=1, normalize=True, fast_forward=True, seeded=True)
 ```
 
 | Parameter | | |
@@ -68,6 +76,7 @@ Game(seed=None, deck="b_red", stake=1, challenge=None, profile=None, hands_order
 | `game_speed` | `float` | the game's speed setting: 0.5, 1, 2 or 4 |
 | `normalize` | `bool` | upper-case the seed and turn `0` into `O`, as the game does with typed seeds |
 | `fast_forward` | `bool` | skip the work of frames in which nothing can happen. Gives identical results, much faster. |
+| `seeded` | `bool` | the player chose the seed (the game's `G.GAME.seeded`). `False`: the run unlocks and discovers as an unseeded run does, changing its pools (see `Profile`) |
 
 **`hands_order`.** To Do List targets, the Orbital Tag's hand and The Ox's
 tie-break iterate over `pairs(G.GAME.hands)`. In LuaJIT that order follows

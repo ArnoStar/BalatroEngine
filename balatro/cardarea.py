@@ -55,6 +55,9 @@ class CardArea:
             tally = sum(1 for c in self.cards if c.ability.set == "Joker")
             if tally > G.GAME.max_jokers:
                 G.GAME.max_jokers = tally
+            G.check_for_unlock(T(type="modify_jokers"))
+        if self is G.deck:
+            G.check_for_unlock(T(type="modify_deck", deck=self))
 
     def remove_card(self, card: "Card | None" = None, discarded_only: bool = False) -> "Card | None":
         if self.removed:
@@ -72,6 +75,8 @@ class CardArea:
                 del self.cards[i]
                 self.remove_from_highlighted(card, True)
                 break
+        if self is self.G.deck:
+            self.G.check_for_unlock(T(type="modify_deck", deck=self))
         return card
 
     def change_size(self, delta: int) -> None:
@@ -88,6 +93,8 @@ class CardArea:
                 for _ in range(abs(delta)):
                     G.draw_card(G.deck, G.hand, None, None, None, None, 0.07)
                     G.ev(self.sort)
+            if self is G.hand:
+                G.check_for_unlock(T(type="min_hand_size"))
         G.ev(ev)
 
     # ------------------------------------------------------------ highlight

@@ -21,7 +21,8 @@ class OracleError(RuntimeError):
 
 
 class Oracle:
-    def __init__(self, src: str | None = None, profile: str = "all", gamespeed: float = 1, dt: float = 1 / 60) -> None:
+    def __init__(self, src: str | None = None, profile: str = "all", gamespeed: float = 1, dt: float = 1 / 60,
+                 unlocks: bool = False) -> None:
         luajit = shutil.which("luajit")
         if luajit is None:
             raise OracleError("luajit not found on PATH")
@@ -31,6 +32,7 @@ class Oracle:
         if src:
             env["BALATRO_SRC"] = src
         env["ORACLE_PROFILE"] = profile
+        env["ORACLE_UNLOCKS"] = "1" if unlocks else "0"
         env["ORACLE_GAMESPEED"] = str(gamespeed)
         env["ORACLE_DT"] = repr(dt)
         log = os.environ.get("ORACLE_LOG")

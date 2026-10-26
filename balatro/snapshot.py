@@ -120,13 +120,14 @@ def snapshot(G: "Game") -> dict:
         "rng": {k: fmt(v) for k, v in G.rng.state.items()},
         "hands_order": list(G.hands_order()),
         "round_scores": {k: fmt(v.amt) for k, v in GAME.round_scores.items()},
-        "profile": profile_desc(G.PROFILE),
+        "profile": profile_desc(G.PROFILE, G.unlocking),
     }
 
 
-def profile_desc(p: Any) -> dict:
-    """What the run added to the player's profile (Game.PROFILE)."""
-    return {
+def profile_desc(p: Any, unlocking: bool = False) -> dict:
+    """What the run added to the player's profile (Game.PROFILE); what it
+    unlocked and discovered only for a run that can (unseeded, no challenge)."""
+    d = {
         "career_stats": dict(p.career_stats),
         "high_scores": {k: fmt(v) for k, v in p.high_scores.items()},
         "joker_usage": {k: {"count": v.count, "wins": {str(s): n for s, n in v.wins.items()},
@@ -134,3 +135,6 @@ def profile_desc(p: Any) -> dict:
                         for k, v in p.joker_usage.items()},
         "voucher_usage": dict(p.voucher_usage),
     }
+    if unlocking:
+        d["progress"] = {"unlocked": list(p.progress.unlocked), "discovered": list(p.progress.discovered)}
+    return d

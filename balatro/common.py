@@ -13,6 +13,7 @@ import math
 from typing import TYPE_CHECKING, Any, Callable
 
 from .card import Card
+from .progress import STREAKS
 from .lua import T, copy_table, floor, lor, lua_mod, lua_pow
 from .rng import lua_tostring
 
@@ -41,7 +42,7 @@ def new_run_profile() -> T:
     whoever keeps the player's profile decides which runs count.  The win
     streaks span runs, so they are left to that keeper too."""
     return T(career_stats=T({k: 0 for k in CAREER_STATS}), high_scores=T({k: 0 for k in HIGH_SCORES}),
-             joker_usage=T(), voucher_usage=T())
+             joker_usage=T(), voucher_usage=T(), progress=T(unlocked=[], discovered=[], streaks=T()))
 
 
 def status_text_info(card: Any, eval_type: str, amt: Any, extra: T | None) -> dict[str, Any]:
@@ -149,6 +150,7 @@ class CommonMixin:
                 G.inc_career_stat("c_dollars_earned", mod)
             G.GAME.dollars = G.GAME.dollars + (mod or 0)
             G.check_and_set_high_score("most_money", G.GAME.dollars)
+            G.check_for_unlock(T(type="money"))
             G._feedback("dollars", amount=mod or 0, total=G.GAME.dollars)
         if instant:
             _mod()
@@ -404,6 +406,10 @@ class CommonMixin:
     def inc_career_stat(self: "Game", stat: str, mod: float | None = None) -> None:
         cs = self.PROFILE.career_stats
         cs[stat] = (cs.get(stat) or 0) + (mod or 0)
+        if stat in STREAKS and self.unlocking:
+            p = self.profile.career_stats
+            p[stat] = (p.get(stat) or 0) + (mod or 0)
+            self.PROFILE.progress.streaks[stat] = p[stat]
 
     def check_and_set_high_score(self: "Game", score: str, amt: Any) -> None:
         """The run's round score (shown at the end of the run) and its high
@@ -473,6 +479,8 @@ class CommonMixin:
             elif s == "Spectral":
                 tot.spectral += 1
             tot.all += 1
+            if not G.is_discovered(key):
+                G.discover_object(card)
             if s in ("Tarot", "Planet"):
                 def outer() -> None:
                     def inner() -> None:
@@ -526,6 +534,7 @@ class CommonMixin:
 
     def add_tag(self: "Game", tag: Any) -> None:
         G = self
+        G.discover_card(G.P_TAGS[tag.key])
         for t in list(G.GAME.tags):
             t.apply_to_run(T(type="tag_add", tag=tag))
         G.GAME.tags.append(tag)
@@ -726,6 +735,7 @@ class CommonMixin:
                     card.set_rental(True)
             edition = G.poll_edition("edi" + (key_append or "") + ante)
             card.set_edition(edition)
+            G.check_for_unlock(T(type="have_edition"))
         return card
 
     def create_playing_card(self: "Game", card_init: T | None, area: "CardArea | None", skip_materialize: Any = None,
@@ -756,6 +766,7 @@ class CommonMixin:
             new_card.ability[k] = copy_table(v)
         if not strip_edition:
             new_card.set_edition(other.edition or T(), None, True)
+        G.check_for_unlock(T(type="have_edition"))
         new_card.set_seal(other.seal, True)
         if other.params:
             new_card.params = other.params

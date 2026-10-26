@@ -47,6 +47,71 @@ end
 
 local function unseeded() return G.GAME.seeded or G.GAME.challenge end
 
+-- ------------------------------------------------------------ unlocks (ORACLE_UNLOCKS=1)
+-- The runs here are seeded (the oracle picks the seed), and a seeded run
+-- unlocks nothing.  With ORACLE_UNLOCKS=1 the game's unlock and discovery
+-- functions run as in an unseeded run (the engine's Game(seeded=False)), from
+-- the boot profile again at every run, and the dump lists what each run
+-- unlocked and discovered, in order.  The achievements are left out (the
+-- engine has none) and the saves and notifications do nothing.
+local UNLOCKS = os.getenv('ORACLE_UNLOCKS') == '1'
+local progress = { unlocked = {}, discovered = {} }
+local boot_flags = nil
+
+local function as_unseeded(f, ...)
+  local s = G.GAME.seeded
+  G.GAME.seeded = nil
+  local r = f(...)
+  G.GAME.seeded = s
+  return r
+end
+
+if UNLOCKS then
+  local orig_unlock_card, orig_discover_card, orig_check = unlock_card, discover_card, check_for_unlock
+  -- (listed before the call: what it unlocks or discovers in turn comes after)
+  function unlock_card(card)
+    if card.unlocked == false and not card.wip and not G.GAME.challenge then
+      progress.unlocked[#progress.unlocked + 1] = card.key
+    end
+    as_unseeded(orig_unlock_card, card)
+  end
+  function discover_card(card)
+    if card and card.key and not card.discovered and not card.wip and not G.GAME.challenge then
+      progress.discovered[#progress.discovered + 1] = card.key
+    end
+    as_unseeded(orig_discover_card, card)
+  end
+  function check_for_unlock(args) return as_unseeded(orig_check, args) end
+  function unlock_achievement() end
+  function notify_alert() end
+  function Game:save_notify() end
+end
+
+-- every run starts from the boot profile: the centers', tags' and blinds' flags, and G.P_LOCKED
+local function reset_unlocks()
+  if not UNLOCKS then return end
+  local sets = { G.P_CENTERS, G.P_TAGS, G.P_BLINDS }
+  if not boot_flags then
+    boot_flags = {}
+    for i, t in ipairs(sets) do
+      boot_flags[i] = {}
+      for k, v in pairs(t) do boot_flags[i][k] = { v.unlocked, v.discovered } end
+    end
+  end
+  for i, t in ipairs(sets) do
+    for k, v in pairs(t) do v.unlocked, v.discovered = boot_flags[i][k][1], boot_flags[i][k][2] end
+  end
+  G.P_LOCKED = {}
+  for k, v in pairs(G.P_CENTERS) do
+    if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) then G.P_LOCKED[#G.P_LOCKED + 1] = v end
+  end
+  table.sort(G.P_LOCKED, function(a, b) return (a.order or 0) < (b.order or 0) end)
+  local p = profile()
+  p.deck_usage, p.challenge_progress = {}, { completed = {}, unlocked = {} }
+  p.career_stats.c_round_interest_cap_streak, p.career_stats.c_single_hand_round_streak = 0, 0
+  progress = { unlocked = {}, discovered = {} }
+end
+
 function inc_career_stat(stat, mod)
   local cs = profile().career_stats
   cs[stat] = (cs[stat] or 0) + (mod or 0)
@@ -65,6 +130,12 @@ local orig_win_game = win_game
 function win_game()
   if unseeded() then
     set_joker_win()
+    if UNLOCKS and not G.GAME.challenge then
+      set_deck_win()
+      for _, kind in ipairs({ 'win_no_hand', 'win_no', 'win_custom', 'win_deck', 'win_stake', 'win' }) do
+        check_for_unlock({ type = kind })
+      end
+    end
     inc_career_stat('c_wins', 1)
   end
   return orig_win_game()
@@ -101,6 +172,7 @@ local orig_update_game_over = Game.update_game_over
 function Game:update_game_over(dt)
   if not G.STATE_COMPLETE and G.GAME.round_resets.ante <= G.GAME.win_ante and unseeded() then
     inc_career_stat('c_losses', 1)
+    if UNLOCKS and not G.GAME.challenge then set_deck_loss() end
     set_joker_loss()
   end
   return orig_update_game_over(self, dt)
@@ -118,6 +190,7 @@ local function profile_dump()
     out.joker_usage[k] = u
   end
   for k, v in pairs(p.voucher_usage) do out.voucher_usage[k] = v.count end
+  if UNLOCKS and not G.GAME.challenge then out.progress = { unlocked = progress.unlocked, discovered = progress.discovered } end
   return out
 end
 
@@ -299,6 +372,7 @@ function handlers.start(cmd)
   G.ACC = 0
   G.last_materialized = nil
   reset_profile()
+  reset_unlocks()
   boot.start_run({ seed = cmd.seed, deck = cmd.deck or 'Red Deck', stake = cmd.stake or 1, challenge = cmd.challenge })
 end
 
@@ -315,6 +389,9 @@ function handlers.skip_blind()
 end
 
 function handlers.reroll_boss() G.FUNCS.reroll_boss(E(nil)) end
+
+-- the run is continued from the main menu (Game:start_run with a save: its only effect on a run)
+function handlers.continue() check_for_unlock({ type = 'continue_game' }) end
 
 function handlers.play(cmd)
   highlight(G.hand, cmd.cards)

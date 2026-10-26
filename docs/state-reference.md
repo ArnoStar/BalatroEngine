@@ -170,10 +170,11 @@ written by the game's own functions at the same places (`inc_career_stat`,
 | `high_scores` | `{hand, furthest_round, furthest_ante, most_money, boss_streak}`: the run's best |
 | `joker_usage` | `{key: {count, wins: {stake: n}, losses: {stake: n}}}`: `count` = won rounds the joker was held in; wins and losses = copies held when the run was won or lost |
 | `voucher_usage` | `{key: times redeemed}` |
+| `progress` | `{unlocked: [keys], discovered: [keys], streaks: {stat: value}}`: what this run unlocked and discovered, in order, and the career streaks' values (the profile's, carried on) when the run changed them. Only an unseeded run (`seeded=False`) that isn't a challenge fills it |
 
-The game only records these for an unseeded run that isn't a challenge. The
-engine's runs all behave as seeded runs (nothing is unlocked), but `PROFILE` is
-recorded as for an unseeded run, every time: whoever keeps the player's profile
+The game only records these for an unseeded run that isn't a challenge. Except
+`progress`, `PROFILE` is recorded as for an unseeded run every time, seeded or
+not: whoever keeps the player's profile
 decides which runs count. For the same reason `GAME.current_boss_streak` counts
 as in an unseeded run. The win streaks, which span runs, are left to that keeper.
 `check_and_set_high_score` also raises `GAME.round_scores` (as the game does,
@@ -204,7 +205,7 @@ compare exactly.
 | `rng` | every RNG stream: `{key: value}` |
 | `hands_order` | the `pairs(G.GAME.hands)` order in use |
 | `round_scores` | `{name: amt}`: the run's scores the game shows when it ends (best hand, cards played, ...) |
-| `profile` | `G.PROFILE` (below): `{career_stats, high_scores, joker_usage: {key: {count, wins, losses}}, voucher_usage}` |
+| `profile` | `G.PROFILE` (below): `{career_stats, high_scores, joker_usage: {key: {count, wins, losses}}, voucher_usage, progress: {unlocked, discovered}}` |
 
 A card is `{key, sort_id, card?, perma_bonus?, edition?, seal?, debuff?,
 facing?, eternal?, perishable?, rental?, forced?, highlighted?, cost,
