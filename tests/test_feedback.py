@@ -97,3 +97,20 @@ def test_sprites_cover_every_key():
     for group in ("centers", "cards", "blinds", "tags", "seals", "stakes", "stickers"):
         for key, v in s[group].items():
             assert v["atlas"] in s["atlases"] and v["pos"] is not None, (group, key)
+
+
+def test_feedback_names_the_joker_that_scores_a_card():
+    # juice_card: the joker of a scored card's suit wiggles as its +4 mult shows on the card
+    G = Game("TESTSEED").start_run()
+    for key in ("j_greedy_joker", "j_lusty_joker", "j_wrathful_joker", "j_gluttenous_joker"):
+        G.do({"cmd": "add_joker", "key": key})
+    jokers = {j.sort_id for j in G.jokers.cards}
+    G.act_select_blind()
+    played = G.hand.cards[0].sort_id
+    fb = G.start_feedback()
+    G.act_play([0])
+    G.stop_feedback()
+    juiced = [i for i, e in enumerate(fb) if e["type"] == "card_juiced"]
+    assert len(juiced) == 1 and fb[juiced[0]]["card"] in jokers
+    mult = next(e for e in fb[juiced[0]:] if e["type"] == "card_text" and e["effect"] == "mult")
+    assert mult["card"] == played and mult["amount"] == 3

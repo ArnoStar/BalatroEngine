@@ -32,7 +32,7 @@ from balatro import Game, Profile, IllegalAction, STATES, STATE_NAMES, DECK_NAME
 | `STATE_NAMES` | state value → name (`{1: 'SELECTING_HAND', ...}`) |
 | `DECK_NAMES` | short deck names → keys: `{'red': 'b_red', ..., 'erratic': 'b_erratic', 'challenge': 'b_challenge'}` |
 | `STAKE_NAMES` | stake names → levels: `{'white': 1, 'red': 2, 'green': 3, 'black': 4, 'blue': 5, 'purple': 6, 'orange': 7, 'gold': 8}` |
-| `__version__` | the engine version (`"0.4.0"`) |
+| `__version__` | the engine version (`"0.4.1"`) |
 
 ### `Profile`
 

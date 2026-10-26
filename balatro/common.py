@@ -232,7 +232,8 @@ class CommonMixin:
         self.ev(lambda: self._feedback("status_text", text=text), trigger="immediate" if d == 0 else "before", delay=d)
 
     def juice_card(self: "Game", card: Card) -> None:
-        self.ev(None)
+        # card:juice_up(0.7): the card that made an effect wiggles
+        self.ev(lambda: self._feedback("card_juiced", card=card.sort_id))
 
     def level_up_hand(self: "Game", card: Any, hand: str, instant: Any = None, amount: int | None = None) -> None:
         G = self
