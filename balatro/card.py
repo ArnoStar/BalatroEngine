@@ -216,7 +216,12 @@ class Card:
             self.edition = T(negative=True, type="negative")
         if self.edition and not silent:
             G.CONTROLLER.locks.edition = True
-            G.ev(None, trigger="after", delay=0.2 if not immediate else 0, blockable=not immediate)
+
+            def shine() -> None:
+                # self:juice_up(1, 0.5) and the edition's sound
+                if self.edition:
+                    G._feedback("card_changed", card=self.sort_id, change="edition")
+            G.ev(shine, trigger="after", delay=0.2 if not immediate else 0, blockable=not immediate)
 
             def unlock() -> None:
                 G.CONTROLLER.locks.edition = False
@@ -231,10 +236,13 @@ class Card:
             self.seal = seal
             if not silent:
                 G.CONTROLLER.locks.seal = True
+                # self:juice_up(0.3, 0.3) and the gold_seal sound
                 if immediate:
+                    G._feedback("card_changed", card=self.sort_id, change="seal")
                     G.CONTROLLER.locks.seal = False
                 else:
-                    G.ev(None, trigger="after", delay=0.3)
+                    G.ev(lambda: G._feedback("card_changed", card=self.sort_id, change="seal"),
+                         trigger="after", delay=0.3)
 
                     def unlock() -> None:
                         G.CONTROLLER.locks.seal = False

@@ -22,6 +22,20 @@ if TYPE_CHECKING:
     from .game import Game
 
 
+def target_span(card: Any) -> tuple[int, int] | None:
+    """How many hand cards a consumable is used on, if it takes any (selected
+    first): its max_highlighted, and Aura's one card (without an edition), which
+    Card:can_use_consumeable checks by name."""
+    cons = card.ability.consumeable
+    if not cons:
+        return None
+    if cons.max_highlighted:
+        return cons.min_highlighted or 1, cons.mod_num
+    if card.ability.name == "Aura":
+        return 1, 1
+    return None
+
+
 class IllegalAction(ValueError):
     """The action is not possible in the current state."""
 
@@ -380,8 +394,9 @@ class ActionsMixin:
         elif G.in_pack() and G.pack_cards is not None and not G.pack_cards.removed and G.pack_cards.cards:
             for i, c in enumerate(G.pack_cards.cards):
                 d = {"cmd": "pick", "index": i}
-                if c.ability.consumeable and c.ability.consumeable.max_highlighted:
-                    d.update(min=c.ability.consumeable.min_highlighted or 1, max=c.ability.consumeable.mod_num)
+                span = target_span(c)
+                if span:
+                    d.update(min=span[0], max=span[1])
                     out.append(d)
                 elif G.can_select_pack_card(c):
                     out.append(d)
@@ -393,10 +408,11 @@ class ActionsMixin:
                 cons = c.ability.consumeable
                 if not cons:
                     continue
-                if cons.max_highlighted:
+                span = target_span(c)
+                if span:
                     blocked = (G.play is not None and G.play.cards) or G.CONTROLLER.locked or G.GAME.STOP_USE > 0
                     if st in (S.SELECTING_HAND, S.TAROT_PACK, S.SPECTRAL_PACK, S.PLANET_PACK) and not blocked:
-                        out.append({"cmd": "use", "index": i, "min": cons.min_highlighted or 1, "max": cons.mod_num})
+                        out.append({"cmd": "use", "index": i, "min": span[0], "max": span[1]})
                 elif c.can_use_consumeable():
                     out.append({"cmd": "use", "index": i})
             for area in ("jokers", "consumeables"):

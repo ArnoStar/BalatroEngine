@@ -110,6 +110,8 @@ them changes the run.
   | `card_flipped` | `card`, `facing` | a card turning over |
   | `card_removed` | `card`, `area` | a card leaving the game |
   | `card_juiced` | `card` | a card wiggling: the joker that made a scored or held card's effect |
+  | `card_changed` | `card`, `change` (`edition`, `seal`) | a card shining with its new edition or seal (Aura, Hex, Déjà Vu...) |
+  | `attention_text` | `card`, `key` (localization key: `k_nope_ex`) | a big text over a card (The Wheel of Fortune's "Nope!") |
 
   `card` is the card's `sort_id`, which never changes during a run.
 - **The hand being selected.** `G.preview_hand(cards)` gives what the game
@@ -285,7 +287,7 @@ needing LuaJIT.
 
 To release, run the oracle tests locally first. Then set `version` in
 `pyproject.toml`, commit, and push a tag `v<version>`
-(`git tag v0.4.1 && git push origin v0.4.1`). The workflow checks that the tag
+(`git tag v0.4.2 && git push origin v0.4.2`). The workflow checks that the tag
 matches the version, and publishes a GitHub release with the wheel and the
 source archive. BalatroWebAPI then moves to the new tag (its
 `[tool.uv.sources]`, then `uv lock`).

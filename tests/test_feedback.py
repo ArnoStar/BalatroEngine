@@ -114,3 +114,53 @@ def test_feedback_names_the_joker_that_scores_a_card():
     assert len(juiced) == 1 and fb[juiced[0]]["card"] in jokers
     mult = next(e for e in fb[juiced[0]:] if e["type"] == "card_text" and e["effect"] == "mult")
     assert mult["card"] == played and mult["amount"] == 3
+
+
+def _give(G, key):
+    """A consumable in the consumable slots (as a shop or pack would add it)."""
+    card = G.create_card("Spectral" if key in ("c_aura", "c_deja_vu") else "Tarot", G.consumeables, None, None, None,
+                         None, key, "t")
+    card.add_to_deck()
+    G.consumeables.emplace(card)
+    G.settle()
+    return len(G.consumeables.cards) - 1
+
+
+def test_aura_is_used_on_one_hand_card_and_shines():
+    G = Game("TESTSEED").start_run()
+    G.act_select_blind()
+    i = _give(G, "c_aura")
+    use = [a for a in G.legal_actions() if a["cmd"] == "use" and a["index"] == i]
+    assert use == [{"cmd": "use", "index": i, "min": 1, "max": 1}]
+    target = G.hand.cards[2]
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i, "targets": [2]})
+    G.stop_feedback()
+    assert target.edition
+    assert [e["change"] for e in fb if e["type"] == "card_changed" and e["card"] == target.sort_id] == ["edition"]
+
+
+def test_a_seal_shows_when_it_is_set():
+    G = Game("TESTSEED").start_run()
+    G.act_select_blind()
+    i = _give(G, "c_deja_vu")
+    target = G.hand.cards[0]
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i, "targets": [0]})
+    G.stop_feedback()
+    assert target.seal == "Red"
+    assert [e["change"] for e in fb if e["type"] == "card_changed"] == ["seal"]
+
+
+def test_the_wheel_says_nope_when_it_fails():
+    G = Game("TESTSEED").start_run()
+    G.do({"cmd": "add_joker", "key": "j_joker"})
+    G.act_select_blind()
+    i = _give(G, "c_wheel_of_fortune")
+    wheel = G.consumeables.cards[i].sort_id
+    G.GAME.probabilities.normal = 0  # (never hits)
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i})
+    G.stop_feedback()
+    assert [(e["card"], e["key"]) for e in fb if e["type"] == "attention_text"] == [(wheel, "k_nope_ex")]
+    assert not G.jokers.cards[0].edition
