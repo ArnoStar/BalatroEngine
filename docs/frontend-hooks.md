@@ -46,6 +46,9 @@ the run's game speed. `card` is the card's `sort_id`.
 | `card_moved` | `card`, `to` (area name) | a card is put in an area (`CardArea:emplace`) |
 | `card_flipped` | `card`, `facing` (`front`/`back`) | a card turns over (`Card:flip`) |
 | `card_removed` | `card`, `area` | a card leaves the game (`Card:remove`) |
+| `card_juiced` | `card` | the joker behind a scored or held card's effect wiggles (`juice_card`) |
+| `card_changed` | `card`, `change` (`edition`, `seal`) | the card juices with its new edition's or seal's sound (`Card:set_edition`, `Card:set_seal`, unless silent) |
+| `attention_text` | `card`, `key` | `attention_text` over a card; `k_nope_ex`: The Wheel of Fortune missed |
 
 `card_text.effect`:
 

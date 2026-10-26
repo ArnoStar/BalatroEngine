@@ -97,3 +97,70 @@ def test_sprites_cover_every_key():
     for group in ("centers", "cards", "blinds", "tags", "seals", "stakes", "stickers"):
         for key, v in s[group].items():
             assert v["atlas"] in s["atlases"] and v["pos"] is not None, (group, key)
+
+
+def test_feedback_names_the_joker_that_scores_a_card():
+    # juice_card: the joker of a scored card's suit wiggles as its +4 mult shows on the card
+    G = Game("TESTSEED").start_run()
+    for key in ("j_greedy_joker", "j_lusty_joker", "j_wrathful_joker", "j_gluttenous_joker"):
+        G.do({"cmd": "add_joker", "key": key})
+    jokers = {j.sort_id for j in G.jokers.cards}
+    G.act_select_blind()
+    played = G.hand.cards[0].sort_id
+    fb = G.start_feedback()
+    G.act_play([0])
+    G.stop_feedback()
+    juiced = [i for i, e in enumerate(fb) if e["type"] == "card_juiced"]
+    assert len(juiced) == 1 and fb[juiced[0]]["card"] in jokers
+    mult = next(e for e in fb[juiced[0]:] if e["type"] == "card_text" and e["effect"] == "mult")
+    assert mult["card"] == played and mult["amount"] == 3
+
+
+def _give(G, key):
+    """A consumable in the consumable slots (as a shop or pack would add it)."""
+    card = G.create_card("Spectral" if key in ("c_aura", "c_deja_vu") else "Tarot", G.consumeables, None, None, None,
+                         None, key, "t")
+    card.add_to_deck()
+    G.consumeables.emplace(card)
+    G.settle()
+    return len(G.consumeables.cards) - 1
+
+
+def test_aura_is_used_on_one_hand_card_and_shines():
+    G = Game("TESTSEED").start_run()
+    G.act_select_blind()
+    i = _give(G, "c_aura")
+    use = [a for a in G.legal_actions() if a["cmd"] == "use" and a["index"] == i]
+    assert use == [{"cmd": "use", "index": i, "min": 1, "max": 1}]
+    target = G.hand.cards[2]
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i, "targets": [2]})
+    G.stop_feedback()
+    assert target.edition
+    assert [e["change"] for e in fb if e["type"] == "card_changed" and e["card"] == target.sort_id] == ["edition"]
+
+
+def test_a_seal_shows_when_it_is_set():
+    G = Game("TESTSEED").start_run()
+    G.act_select_blind()
+    i = _give(G, "c_deja_vu")
+    target = G.hand.cards[0]
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i, "targets": [0]})
+    G.stop_feedback()
+    assert target.seal == "Red"
+    assert [e["change"] for e in fb if e["type"] == "card_changed"] == ["seal"]
+
+
+def test_the_wheel_says_nope_when_it_fails():
+    G = Game("TESTSEED").start_run()
+    G.do({"cmd": "add_joker", "key": "j_joker"})
+    G.act_select_blind()
+    i = _give(G, "c_wheel_of_fortune")
+    wheel = G.consumeables.cards[i].sort_id
+    G.GAME.probabilities.normal = 0  # (never hits)
+    fb = G.start_feedback()
+    G.do({"cmd": "use", "index": i})
+    G.stop_feedback()
+    assert [(e["card"], e["key"]) for e in fb if e["type"] == "attention_text"] == [(wheel, "k_nope_ex")]
+    assert not G.jokers.cards[0].edition

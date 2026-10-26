@@ -311,7 +311,9 @@ def use_consumeable(self: "Card", area: Any, copier: "Card | None" = None) -> No
                     GAME.ecto_minus = GAME.ecto_minus + 1
             ev(wheel, trigger="after", delay=0.4)
         else:
-            ev(None, trigger="after", delay=0.4)
+            # attention_text "Nope!" over the used card
+            ev(lambda: G._feedback("attention_text", card=used_tarot.sort_id, key="k_nope_ex"), trigger="after",
+               delay=0.4)
         G.delay(0.6)
     return None
 

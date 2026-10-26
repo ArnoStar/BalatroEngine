@@ -5,7 +5,7 @@
 The engine needs Python 3.12 or later and nothing else.
 
 ```
-pip install git+https://github.com/ArnoStar/BalatroEngine.git@v0.4.0
+pip install git+https://github.com/ArnoStar/BalatroEngine.git@v0.4.2
 # or, from a checkout:
 pip install .            # or: uv pip install .
 ```

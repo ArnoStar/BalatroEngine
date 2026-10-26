@@ -176,7 +176,7 @@ class StateEventsMixin:
                                     reps.append(e)
                     for eff in effects:
                         if eff.card:
-                            G.ev(None)
+                            G.juice_card(eff.card)
                         if eff.h_dollars:
                             G.ease_dollars(eff.h_dollars)
                             G.card_eval_status_text(G.hand.cards[i], "dollars", eff.h_dollars)
@@ -611,7 +611,7 @@ class StateEventsMixin:
                                     reps.append(e)
                     for eff in effects:
                         if eff.card:
-                            G.ev(None)
+                            G.juice_card(eff.card)
                         if eff.dollars:
                             G.ease_dollars(eff.dollars)
                             status(hc, "dollars", eff.dollars)
