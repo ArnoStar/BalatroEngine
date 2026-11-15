@@ -233,9 +233,9 @@ class CommonMixin:
         d = lor(delay, 0.6)
         self.ev(lambda: self._feedback("status_text", text=text), trigger="immediate" if d == 0 else "before", delay=d)
 
-    def juice_card(self: "Game", card: Card) -> None:
-        # card:juice_up(0.7): the card that made an effect wiggles
-        self.ev(lambda: self._feedback("card_juiced", card=card.sort_id))
+    def juice_card(self: "Game", card: Card, scale: float | None = 0.7, rot: float | None = None) -> None:
+        # card:juice_up(scale, rot) in an event: juice_card's card (0.7) or another card an effect is about
+        self.ev(lambda: self._feedback("card_juiced", card=card.sort_id, scale=scale, rot=rot))
 
     def level_up_hand(self: "Game", card: Any, hand: str, instant: Any = None, amount: int | None = None) -> None:
         G = self

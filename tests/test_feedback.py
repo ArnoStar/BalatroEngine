@@ -164,3 +164,33 @@ def test_the_wheel_says_nope_when_it_fails():
     G.stop_feedback()
     assert [(e["card"], e["key"]) for e in fb if e["type"] == "attention_text"] == [(wheel, "k_nope_ex")]
     assert not G.jokers.cards[0].edition
+
+
+def _scoring_feedback(jokers, play):
+    G = Game("TESTSEED").start_run()
+    for key in jokers:
+        G.do({"cmd": "add_joker", "key": key})
+    G.act_select_blind()
+    fb = G.start_feedback()
+    G.act_play(play(G))
+    G.stop_feedback()
+    return G, fb
+
+
+def test_baseball_card_names_the_uncommon_joker_it_multiplies():
+    # Baseball Card's event: context.other_joker:juice_up(0.5, 0.5), then its X1.5 shows on itself
+    G, fb = _scoring_feedback(["j_trading", "j_baseball"], lambda G: [0])
+    trading, baseball = (j.sort_id for j in G.jokers.cards)
+    juiced = [e for e in fb if e["type"] == "card_juiced" and e["card"] == trading]
+    assert len(juiced) == 1 and (juiced[0]["scale"], juiced[0]["rot"]) == (0.5, 0.5)
+    text = next(e for e in fb if e["type"] == "card_text" and e["card"] == baseball)
+    assert text["effect"] == "x_mult" and text["amount"] == 1.5 and text["t"] >= juiced[0]["t"]
+
+
+def test_midas_mask_names_the_cards_it_turns_gold():
+    def faces(G):
+        return [i for i, c in enumerate(G.hand.cards) if c.is_face()][:1] or [0]
+    G, fb = _scoring_feedback(["j_midas_mask"], faces)
+    gold = {c.sort_id for c in G.playing_cards if c.config.center.key == "m_gold"}
+    juiced = {e["card"] for e in fb if e["type"] == "card_juiced" and e["scale"] is None}
+    assert gold and juiced == gold
