@@ -540,7 +540,7 @@ def calculate_joker(self: "Card", context: T) -> Any:  # noqa: C901 - mirrors th
                 return T(message=MSG, repetitions=ab.extra, card=self)
     elif context.other_joker:
         if name == "Baseball Card" and context.other_joker.config.center.rarity == 2 and self is not context.other_joker:
-            G.ev(None)
+            G.juice_card(context.other_joker, 0.5, 0.5)  # the Uncommon Joker it multiplies wiggles
             return T(message=MSG, Xmult_mod=ab.extra)
     else:
         if context.cardarea is G.jokers:
@@ -576,7 +576,7 @@ def _before(self: "Card", context: T) -> Any:
             if v.is_face():
                 faces.append(v)
                 v.set_ability(G.P_CENTERS["m_gold"], None, True)
-                G.ev(None)
+                G.juice_card(v, None)  # v:juice_up(): the card turned Gold wiggles
         if faces:
             return T(message=MSG, card=self)
     if name == "Vampire" and not context.blueprint:
@@ -588,6 +588,7 @@ def _before(self: "Card", context: T) -> Any:
                 v.set_ability(G.P_CENTERS["c_base"], None, True)
 
                 def unvamp(v: Any = v) -> None:
+                    G._feedback("card_juiced", card=v.sort_id, scale=None, rot=None)  # v:juice_up()
                     v.vampired = None
                 G.ev(unvamp)
         if enhanced:

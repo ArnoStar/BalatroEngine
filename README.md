@@ -109,7 +109,7 @@ them changes the run.
   | `card_moved` | `card`, `to` (area name) | a card arriving in an area |
   | `card_flipped` | `card`, `facing` | a card turning over |
   | `card_removed` | `card`, `area` | a card leaving the game |
-  | `card_juiced` | `card` | a card wiggling: the joker that made a scored or held card's effect |
+  | `card_juiced` | `card`, `scale`, `rot` | a card wiggling (`juice_up`'s arguments, `null` for its defaults): the joker that made a scored or held card's effect, the Uncommon Joker Baseball Card multiplies, a card Midas Mask or Vampire changes |
   | `card_changed` | `card`, `change` (`edition`, `seal`) | a card shining with its new edition or seal (Aura, Hex, Déjà Vu...) |
   | `attention_text` | `card`, `key` (localization key: `k_nope_ex`) | a big text over a card (The Wheel of Fortune's "Nope!") |
   | `card_unlocked` | `key`, `set` | the "Unlocked!" notification (an unseeded run, `seeded=False`) |
@@ -298,7 +298,7 @@ needing LuaJIT.
 
 To release, run the oracle tests locally first. Then set `version` in
 `pyproject.toml`, commit, and push a tag `v<version>`
-(`git tag v0.5.0 && git push origin v0.5.0`). The workflow checks that the tag
+(`git tag v0.5.1 && git push origin v0.5.1`). The workflow checks that the tag
 matches the version, and publishes a GitHub release with the wheel and the
 source archive. BalatroWebAPI then moves to the new tag (its
 `[tool.uv.sources]`, then `uv lock`).
