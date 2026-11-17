@@ -96,6 +96,9 @@ class CardArea:
             if self is G.hand:
                 G.check_for_unlock(T(type="min_hand_size"))
         G.ev(ev)
+        if self is G.hand:
+            for m in G.mods:
+                m.hand_size_changed(G, self, delta)
 
     # ------------------------------------------------------------ highlight
     def add_to_highlighted(self, card: "Card", silent: Any = None) -> None:
