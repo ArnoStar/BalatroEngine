@@ -378,6 +378,12 @@ class CommonMixin:
         return out
 
     def get_blind_amount(self: "Game", ante: int) -> float:
+        amount = self._get_blind_amount(ante)
+        for m in self.mods:
+            amount = m.blind_amount(self, ante, amount)
+        return amount
+
+    def _get_blind_amount(self: "Game", ante: int) -> float:
         k = 0.75
         scaling = self.GAME.modifiers.scaling
         if not scaling or scaling == 1:

@@ -26,6 +26,7 @@ from .cardarea import CardArea
 from .common import CommonMixin, new_run_profile
 from .events import EventManager
 from .lua import T, copy_table, to_T
+from .mods import Mod, make_mods
 from .progress import Profile, ProgressMixin
 from .rng import SEED_ALPHABET, PseudoRandom, lua_tostring, normalize_seed
 from .state_events import StateEventsMixin
@@ -108,6 +109,9 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
     G.GAME.seeded): only an unseeded run that isn't a challenge unlocks and
     discovers things, as in the game (progress.py), changing the pools for the
     rest of the run; ``G.PROFILE.progress`` lists what it unlocked.
+
+    ``mods`` change the rules for a game mode (balatro.mods): ``["pvp"]``.
+    Without mods the run is the original game.
     """
 
     STATES = STATES
@@ -115,8 +119,9 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
     def __init__(self, seed: str | None = None, deck: str = "b_red", stake: int | str = 1, challenge: str | None = None,
                  profile: Profile | None = None, hands_order: Iterable[str] | None = None,
                  game_speed: float = 1, normalize: bool = True, fast_forward: bool = True,
-                 seeded: bool = True) -> None:
+                 seeded: bool = True, mods: Iterable[Mod | str | dict] | None = None) -> None:
         self.data = d = data_mod.load()
+        self.mods: list[Mod] = make_mods(mods)
         self.P_CENTERS = d.P_CENTERS
         self.P_CARDS = d.P_CARDS
         self.P_BLINDS = d.P_BLINDS
@@ -221,6 +226,17 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         if self.profile.all:
             return True
         return key in self.profile.discovered
+
+    def mod(self, key: str) -> Mod | None:
+        """The run's mod with this key (balatro.mods), if it has one."""
+        return next((m for m in self.mods if m.key == key), None)
+
+    def _mods_rule(self, hook: str, default: bool) -> bool:
+        for m in self.mods:
+            r = getattr(m, hook)(self)
+            if r is not None:
+                return bool(r)
+        return default
 
     def hands_order(self) -> list[str]:
         """The order of ``pairs(G.GAME.hands)`` (see DEFAULT_HANDS_ORDER)."""
@@ -374,6 +390,8 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         GAME.selected_back.apply_to_run()
         if challenge is not None:
             self._apply_challenge(challenge)
+        for m in G.mods:
+            m.setup(G)
         sp = GAME.starting_params
         rr = GAME.round_resets
         rr.hands = sp.hands
@@ -439,6 +457,8 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         protos.sort(key=lambda p: (p.s or "") + (p.r or "") + (p.e or "") + (p.d or "") + (p.g or ""))
         for p in protos:
             G.card_from_control(p)
+        for m in G.mods:
+            m.start(G)
         GAME.starting_deck_size = len(G.playing_cards)
         G.check_and_set_high_score("most_money", GAME.dollars)
 
@@ -519,14 +539,16 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
     def update_selecting_hand(self) -> None:
         G = self
         if not G.hand.cards and not G.deck.cards and not G.play.cards:
-            G.end_round()
+            if not G.mods or G._mods_rule("out_of_cards", True):
+                G.end_round()
         if G.shop is not None:
             G.shop.remove()
             G.shop = None
         if not G.STATE_COMPLETE:
             G.STATE_COMPLETE = True
             if not G.hand.cards and not G.deck.cards:
-                G.end_round()
+                if not G.mods or G._mods_rule("out_of_cards", True):
+                    G.end_round()
 
     def update_shop(self) -> None:
         G = self
@@ -595,7 +617,10 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
             G.STATE_COMPLETE = True
 
             def ev() -> None:
-                if G.GAME.chips - G.GAME.blind.chips >= 0 or G.GAME.current_round.hands_left < 1:
+                out = G.GAME.current_round.hands_left < 1
+                if G.mods:
+                    out = G._mods_rule("out_of_hands", out)
+                if G.GAME.chips - G.GAME.blind.chips >= 0 or out:
                     G.STATE = G.STATES.NEW_ROUND
                 else:
                     G.STATE = G.STATES.DRAW_TO_HAND

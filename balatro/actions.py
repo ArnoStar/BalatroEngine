@@ -358,6 +358,12 @@ class ActionsMixin:
         ``"n"`` and accept any 1-5 card indices; consumables that need targets
         list ``"min"``/``"max"`` targets and whether they can be used with
         ``targets=[]`` (already)."""
+        out = self._legal_actions()
+        for m in self.mods:
+            out = m.legal_actions(self, out)
+        return out
+
+    def _legal_actions(self: "Game") -> list[dict]:
         G = self
         S = G.STATES
         out: list[dict] = []
@@ -435,6 +441,18 @@ class ActionsMixin:
     # ----------------------------------------------------------- dispatch
     def do(self: "Game", cmd: dict) -> None:
         """Apply a command dict, e.g. ``{"cmd": "play", "cards": [0, 1]}``."""
+        mods = self.mods
+        if not mods:
+            self._do(cmd)
+            return
+        for m in mods:
+            m.before_command(self, cmd)
+        if not any(m.command(self, cmd) for m in mods):
+            self._do(cmd)
+        for m in mods:
+            m.after_command(self, cmd)
+
+    def _do(self: "Game", cmd: dict) -> None:
         c = cmd["cmd"]
         if c == "select_blind":
             self.act_select_blind()

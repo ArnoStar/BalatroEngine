@@ -120,6 +120,13 @@ class StateEventsMixin:
                     G.card_eval_status_text(j, "jokers", None, None, None, e)
                 j.calculate_rental()
                 j.calculate_perishable()
+            if G.mods:
+                lost = not (GAME.chips - GAME.blind.chips >= 0)
+                saved = lost and not game_over
+                if game_over and G._mods_rule("round_lost", False):
+                    game_over = False
+                for m in G.mods:
+                    m.round_ended(G, lost, saved)
             if GAME.round_resets.ante == GAME.win_ante and GAME.blind.get_type() == "Boss":
                 game_won = True
                 GAME.won = True
