@@ -129,7 +129,8 @@ them changes the run.
 `Game(seed, mods=["pvp"])` changes the rules for a game mode the original game
 doesn't have. A run without mods is the original game. `"pvp"`: a lost round
 doesn't end the run, and `balatro.mods.pvp.match_state` turns two players'
-runs into hit points. See [`docs/mods.md`](docs/mods.md).
+runs into hit points. `"coop"`: two players play one run in turns, each with
+their own deck, sharing the jokers (5 slots each), hands and discards. See [`docs/mods.md`](docs/mods.md).
 
 ### Seed analysis
 

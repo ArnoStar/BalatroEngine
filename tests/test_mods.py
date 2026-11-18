@@ -129,3 +129,100 @@ def test_match_state():
     # a run over for good (the game's own game over)
     s = match_state([[], []], eliminated=[False, True])
     assert s["over"] and s["winner"] == 0
+
+
+# ------------------------------------------------------------------ coop
+def coop() -> Game:
+    return Game("TESTSEED", mods=["coop"]).start_run()
+
+
+def test_coop_set_up():
+    G = coop()
+    m = G.mod("coop")
+    assert len(G.playing_cards) == 104 and len(m.seats[1].deck.cards) == 52
+    assert G.GAME.round_resets.discards == 8 and G.GAME.round_resets.hands == 4  # (the Red Deck's 4 discards, doubled)
+    assert G.jokers.config.card_limit == 10 and m.limits == [5, 5]
+    assert G.get_blind_amount(1) == 300 and G.get_blind_amount(4) == 10000 and G.get_blind_amount(8) == 170000
+
+
+def test_coop_first_player_deals_as_the_original_game():
+    G = coop()
+    G.do({"cmd": "select_blind", "seat": 0})
+    assert [c.config.card_key for c in G.hand.cards] == ["H_A", "H_K", "D_Q", "S_9", "C_9", "C_5", "D_5", "C_4"]
+
+
+def test_coop_turns():
+    G = coop()
+    m = G.mod("coop")
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "select_blind", "seat": 1})
+    G.do({"cmd": "select_blind", "seat": 0})
+    first = [c.sort_id for c in G.hand.cards]
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "play", "cards": [0], "seat": 1})
+    G.do({"cmd": "discard", "cards": [0], "seat": 0})  # (a discard keeps the turn)
+    assert m.turn == 0 and G.GAME.current_round.discards_left == 7
+    fb = G.start_feedback()
+    G.do({"cmd": "play", "cards": [0, 1, 2, 3, 4], "seat": 0})
+    G.stop_feedback()
+    assert m.turn == 1 and G.hand is m.seats[1].hand and len(G.hand.cards) == 8
+    assert not set(first) & {c.sort_id for c in G.hand.cards}  # (the other player's own cards)
+    assert any(e["type"] == "turn" and e["seat"] == 1 for e in fb)
+    assert G.GAME.current_round.hands_left == 3  # (hands are shared)
+    G.do({"cmd": "play", "cards": [0], "seat": 1})
+    assert m.turn == 0 and G.hand is m.seats[0].hand and len(G.hand.cards) == 8
+
+
+def test_coop_round_end_and_next_starter():
+    G = coop()
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    G.do({"cmd": "play", "cards": [0], "seat": 0})
+    G.do({"cmd": "cheat", "win": True, "seat": 1})  # (player 2's turn: the blind is beaten)
+    assert G.STATE == G.STATES.ROUND_EVAL
+    assert all(not s.hand.cards and not s.discard.cards and len(s.deck.cards) == 52 for s in m.seats)
+    G.do({"cmd": "cash_out", "seat": 0})
+    G.do({"cmd": "end_shop", "seat": 0})
+    assert G.in_shop()  # (the other player is still shopping)
+    G.do({"cmd": "end_shop", "seat": 1})
+    assert G.STATE == G.STATES.BLIND_SELECT
+    assert m.turn == 1  # (player 1 played the last hand: player 2 starts the next round)
+    G.do({"cmd": "select_blind", "seat": 1})
+    assert G.hand is m.seats[1].hand and len(G.hand.cards) == 8
+
+
+def test_coop_jokers_are_each_players():
+    G = coop()
+    m = G.mod("coop")
+    G.do({"cmd": "add_joker", "key": "j_joker", "seat": 1})
+    G.do({"cmd": "add_joker", "key": "j_juggler", "seat": 0})
+    assert [(c.config.center.key, m.owner(c)) for c in G.jokers.cards] == [("j_juggler", 0), ("j_joker", 1)]
+    assert all(s.hand.config.card_limit == 9 for s in m.seats)  # (the hand's size is both players')
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "sell", "area": "jokers", "index": 1, "seat": 0})
+    G.do({"cmd": "sell", "area": "jokers", "index": 1, "seat": 1})
+    assert [c.config.center.key for c in G.jokers.cards] == ["j_juggler"]
+    for _ in range(5):
+        G.do({"cmd": "add_joker", "key": "j_joker", "seat": 0})
+    assert [m.owner(c) for c in G.jokers.cards] == [0, 0, 0, 0, 0, 1]  # (player 1's half is full)
+    m.viewer = 1
+    assert all(a["index"] == 5 for a in G.legal_actions() if a["cmd"] == "sell" and a["area"] == "jokers")
+
+
+def test_coop_shop():
+    G = coop()
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    G.do({"cmd": "cheat", "win": True, "dollars": 100, "seat": 0})
+    G.do({"cmd": "cash_out", "seat": 1})
+    joker = next(i for i, c in enumerate(G.shop_jokers.cards) if c.ability.set == "Joker")
+    G.do({"cmd": "buy", "area": "shop_jokers", "index": joker, "seat": 1})
+    assert [m.owner(c) for c in G.jokers.cards] == [1]
+    assert G.hand is m.seats[m.turn].hand  # (back to the turn's areas after a player's purchase)
+    # a pack is its opener's (an Arcana or Spectral pack deals their cards)
+    G.do({"cmd": "buy", "area": "shop_booster", "index": 0, "seat": 1})
+    assert G.in_pack() and m.pack_seat == 1
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "skip_pack", "seat": 0})
+    G.do({"cmd": "skip_pack", "seat": 1})
+    assert G.in_shop() and m.pack_seat is None and G.hand is m.seats[m.turn].hand

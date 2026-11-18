@@ -426,6 +426,34 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         G.hand_T_y = TILE_H - HAND_H  # set_screen_positions
 
         # the starting deck
+        for p in G.starting_protos(challenge):
+            G.card_from_control(p)
+        for m in G.mods:
+            m.start(G)
+        GAME.starting_deck_size = len(G.playing_cards)
+        G.check_and_set_high_score("most_money", GAME.dollars)
+
+        G.delay(0.5)
+        GAME.current_round.discards_left = rr.discards
+        GAME.current_round.hands_left = rr.hands
+        G.deck.shuffle()
+        G.reset_idol_card()
+        G.reset_mail_rank()
+        GAME.current_round.ancient_card.suit = None
+        G.reset_ancient_card()
+        G.reset_castle_card()
+
+        GAME.blind = Blind(G)
+        GAME.blind.set_blind(None, None, True)
+        G.reset_blinds()
+        G.ev(None)  # unlock_notify
+        G.settle()
+        return self
+
+    def starting_protos(self, challenge: T | None) -> list[T]:
+        """The starting deck's cards, in the order they are made (Game:start_run)."""
+        G = self
+        sp = G.GAME.starting_params
         de = challenge.deck if challenge is not None and challenge.deck else None
         if de is not None and de.cards:
             protos = [T(v) for v in de.cards]
@@ -455,29 +483,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
             for v in sp.extra_cards:
                 protos.append(T(v))
         protos.sort(key=lambda p: (p.s or "") + (p.r or "") + (p.e or "") + (p.d or "") + (p.g or ""))
-        for p in protos:
-            G.card_from_control(p)
-        for m in G.mods:
-            m.start(G)
-        GAME.starting_deck_size = len(G.playing_cards)
-        G.check_and_set_high_score("most_money", GAME.dollars)
-
-        G.delay(0.5)
-        GAME.current_round.discards_left = rr.discards
-        GAME.current_round.hands_left = rr.hands
-        G.deck.shuffle()
-        G.reset_idol_card()
-        G.reset_mail_rank()
-        GAME.current_round.ancient_card.suit = None
-        G.reset_ancient_card()
-        G.reset_castle_card()
-
-        GAME.blind = Blind(G)
-        GAME.blind.set_blind(None, None, True)
-        G.reset_blinds()
-        G.ev(None)  # unlock_notify
-        G.settle()
-        return self
+        return protos
 
     def _apply_challenge(self, ch: T) -> None:
         G = self

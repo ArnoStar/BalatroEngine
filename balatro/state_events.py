@@ -164,39 +164,7 @@ class StateEventsMixin:
                         return True
                     return None
                 G.event(win, blocking=False, blockable=False)
-            hand = G.hand.cards
-            for i in range(len(hand)):
-                reps: list[Any] = [1]
-                rep = 0
-                while rep < len(reps):
-                    if reps[rep] != 1:
-                        r = reps[rep].jokers or reps[rep].seals
-                        G.card_eval_status_text(r.card, "jokers", None, None, None, r)
-                    effects = [G.hand.cards[i].get_end_of_round_effect()]
-                    for jk in list(G.jokers.cards):
-                        e = jk.calculate_joker(T(cardarea=G.hand, other_card=G.hand.cards[i], individual=True, end_of_round=True))
-                        if e:
-                            effects.append(e)
-                    if reps[rep] == 1:
-                        e = eval_card(G, G.hand.cards[i], T(end_of_round=True, cardarea=G.hand, repetition=True, repetition_only=True))
-                        if nonempty(e) and (nonempty(effects[0]) or len(effects) > 1):
-                            for _ in range(e.seals.repetitions):
-                                reps.append(e)
-                        for jk in list(G.jokers.cards):
-                            e = eval_card(G, jk, T(cardarea=G.hand, other_card=G.hand.cards[i], repetition=True,
-                                                   end_of_round=True, card_effects=effects))
-                            if nonempty(e):
-                                for _ in range(e.jokers.repetitions):
-                                    reps.append(e)
-                    for eff in effects:
-                        if eff.card:
-                            G.juice_card(eff.card)
-                        if eff.h_dollars:
-                            G.ease_dollars(eff.h_dollars)
-                            G.card_eval_status_text(G.hand.cards[i], "dollars", eff.h_dollars)
-                        if eff.extra:
-                            G.card_eval_status_text(G.hand.cards[i], "extra", None, None, None, eff.extra)
-                    rep += 1
+            G.end_of_round_hand()
             G.delay(0.3)
             G.draw_from_hand_to_discard()
             if GAME.blind.get_type() == "Boss":
@@ -240,6 +208,43 @@ class StateEventsMixin:
                     v.ability.forced_selection = None
             G.ev(ev2, trigger="after", delay=0.3)
         G.ev(ev, trigger="after", delay=0.2)
+
+    def end_of_round_hand(self: "Game") -> None:
+        """end_round's cards held in hand at the end of the round (Gold cards, Blue seals ...)."""
+        G = self
+        hand = G.hand.cards
+        for i in range(len(hand)):
+            reps: list[Any] = [1]
+            rep = 0
+            while rep < len(reps):
+                if reps[rep] != 1:
+                    r = reps[rep].jokers or reps[rep].seals
+                    G.card_eval_status_text(r.card, "jokers", None, None, None, r)
+                effects = [G.hand.cards[i].get_end_of_round_effect()]
+                for jk in list(G.jokers.cards):
+                    e = jk.calculate_joker(T(cardarea=G.hand, other_card=G.hand.cards[i], individual=True, end_of_round=True))
+                    if e:
+                        effects.append(e)
+                if reps[rep] == 1:
+                    e = eval_card(G, G.hand.cards[i], T(end_of_round=True, cardarea=G.hand, repetition=True, repetition_only=True))
+                    if nonempty(e) and (nonempty(effects[0]) or len(effects) > 1):
+                        for _ in range(e.seals.repetitions):
+                            reps.append(e)
+                    for jk in list(G.jokers.cards):
+                        e = eval_card(G, jk, T(cardarea=G.hand, other_card=G.hand.cards[i], repetition=True,
+                                               end_of_round=True, card_effects=effects))
+                        if nonempty(e):
+                            for _ in range(e.jokers.repetitions):
+                                reps.append(e)
+                for eff in effects:
+                    if eff.card:
+                        G.juice_card(eff.card)
+                    if eff.h_dollars:
+                        G.ease_dollars(eff.h_dollars)
+                        G.card_eval_status_text(G.hand.cards[i], "dollars", eff.h_dollars)
+                    if eff.extra:
+                        G.card_eval_status_text(G.hand.cards[i], "extra", None, None, None, eff.extra)
+                rep += 1
 
     # ========================================================= new round
     def new_round(self: "Game") -> None:
