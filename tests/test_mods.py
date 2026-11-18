@@ -226,3 +226,20 @@ def test_coop_shop():
         G.do({"cmd": "skip_pack", "seat": 0})
     G.do({"cmd": "skip_pack", "seat": 1})
     assert G.in_shop() and m.pack_seat is None and G.hand is m.seats[m.turn].hand
+
+
+def test_coop_stats():
+    G = coop()
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    G.do({"cmd": "discard", "cards": [0], "seat": 0})
+    G.do({"cmd": "play", "cards": [0, 1, 2, 3, 4], "seat": 0})
+    first = G.last_score.score
+    G.do({"cmd": "play", "cards": [0], "seat": 1})
+    s = m.state()["stats"]
+    assert s[0]["hands"] == 1 and s[0]["discards"] == 1 and s[0]["chips"] == first == s[0]["best_hand"]
+    assert s[1]["hands"] == 1 and s[1]["discards"] == 0 and s[1]["chips"] == G.last_score.score
+    assert G.GAME.chips == s[0]["chips"] + s[1]["chips"]  # (the round's score is both players' hands)
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "play", "cards": [0], "seat": 1})  # (a refused command counts nothing)
+    assert m.state()["stats"][1]["hands"] == 1

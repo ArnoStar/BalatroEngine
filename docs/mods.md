@@ -108,4 +108,5 @@ allow raises `IllegalAction`. `legal_actions()` lists the `viewer` seat's.
 Feedback adds `{"type": "turn", "seat"}` when the turn passes and
 `{"type": "shop_vote", "seats"}` when a player asks to leave the shop.
 `state()` gives the turn, the joker slots, the shop votes, the pack's
-opener and each seat's deck and hand sizes.
+opener, each seat's deck and hand sizes, and each player's `stats` (hands
+played, their chips, the best one and its name, discards).
