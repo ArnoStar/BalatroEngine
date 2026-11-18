@@ -4,7 +4,9 @@ A mod is an object whose hooks the engine calls at fixed places of the game's
 code.  Every hook does nothing by default, and a game without mods never calls
 one, so a run without mods is exactly the original game (same seed, same
 choices, same run).  A mod keeps to the original wherever its mode allows:
-the PvP mode is the original game until a round is lost.
+the PvP mode is the original game until a round is lost, and in the coop mode
+the first player's deck, the shop, the bosses and the tags keep the original's
+random streams (what the second player does can still change them).
 
     G = Game("SEED", mods=["pvp"]).start_run()
     G = Game("SEED", mods=[{"key": "pvp"}]).start_run()
@@ -24,6 +26,7 @@ copies with the rest of the game.  Hooks:
 - ``out_of_hands(G)`` / ``out_of_cards(G)``: whether the round ends because the
   player has no hands left / no cards left (None: the game's own rule).
 - ``hand_size_changed(G, area, delta)``: the hand's size changed by ``delta``.
+- ``shuffle_key(G, area, key)``: the random stream a card area is shuffled with.
 - ``before_command(G, cmd)``, ``command(G, cmd)`` (True: the mod played it),
   ``after_command(G, cmd)``, ``legal_actions(G, actions)``: the player's
   commands (``Game.do``) and what is legal (``Game.legal_actions``).
@@ -80,6 +83,9 @@ class Mod:
     def hand_size_changed(self, G: "Game", area: "CardArea", delta: int) -> None:
         pass
 
+    def shuffle_key(self, G: "Game", area: "CardArea", key: str) -> str:
+        return key
+
     # ----------------------------------------------------------- commands
     def before_command(self, G: "Game", cmd: dict) -> None:
         pass
@@ -99,8 +105,9 @@ class Mod:
 
 
 def registry() -> dict[str, type[Mod]]:
+    from .coop import Coop
     from .pvp import PvP
-    return {PvP.key: PvP}
+    return {PvP.key: PvP, Coop.key: Coop}
 
 
 def make_mod(spec: "Mod | str | dict[str, Any]") -> Mod:

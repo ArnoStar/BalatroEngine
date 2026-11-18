@@ -190,7 +190,10 @@ class CardArea:
         cards = self.cards
         if cards and cards[0].sort_id is not None:
             cards.sort(key=lambda c: c.sort_id)
-        G.rng.shuffle(cards, G.rng.pseudoseed(seed or "shuffle"))
+        key = seed or "shuffle"
+        for m in G.mods:
+            key = m.shuffle_key(G, self, key)
+        G.rng.shuffle(cards, G.rng.pseudoseed(key))
 
     def sort(self, method: str | None = None) -> None:
         self.config.sort = method or self.config.sort
