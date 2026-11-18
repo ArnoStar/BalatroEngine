@@ -17,6 +17,8 @@
   playing card in their deck, a pack is theirs to open); the shop is left once
   both players have asked to leave it.
 - **The blinds** grow faster: ``(1 + BLIND_GROWTH * (ante - 1))`` times the game's.
+- **Each player's numbers** (``stats``): the hands they played and their
+  chips, their best hand, their discards (for the players to compare).
 
 Commands carry the player's ``seat`` (0 or 1); legal actions are a seat's
 (``viewer``). Feedback has ``{"type": "turn", "seat": ...}`` when the turn
@@ -63,7 +65,9 @@ class Coop(Mod):
         self.shop_votes: list[int] = []  # who asked to leave the shop
         self.pack_seat: int | None = None  # who opened the pack on screen
         self.viewer: int | None = None  # whose legal actions G.legal_actions() lists (None: the turn's)
+        self.stats: list[dict[str, Any]] = [new_stats() for _ in range(SEATS)]
         self._acting = 0
+        self._last_score: Any = None
         self._limit_before = 0
 
     # ------------------------------------------------------------ set-up
@@ -195,6 +199,7 @@ class Coop(Mod):
         self.check(G, seat, cmd)
         self._acting = seat
         self._limit_before = G.jokers.config.card_limit
+        self._last_score = G.last_score
         # in the shop, a player acts with their own areas (a playing card bought goes in their deck, a pack is theirs)
         if G.in_shop() and cmd.get("cmd") in ("buy", "reroll", "use", "sell"):
             self.use(G, seat)
@@ -221,6 +226,7 @@ class Coop(Mod):
         self.own_jokers(G, seat)
         if c == "select_blind":
             self.seats[self.active].round_seen = G.GAME.round
+        self.count(G, seat, c)
         if c == "play":
             self.turn = 1 - seat  # (after each hand: a round starts with the player who didn't play last)
         if G.STATE == S.SELECTING_HAND and self.active != self.turn:
@@ -245,6 +251,18 @@ class Coop(Mod):
         if not G.in_shop():
             self.shop_votes = []
 
+    def count(self, G: "Game", seat: int, c: str | None) -> None:
+        """The player's numbers after their command (a hand played: its score, from the scoring)."""
+        st = self.stats[seat]
+        if c == "discard":
+            st["discards"] += 1
+        elif c == "play" and G.last_score is not None and G.last_score is not self._last_score:
+            score = G.last_score.score
+            st["hands"] += 1
+            st["chips"] += score
+            if score > st["best_hand"]:
+                st["best_hand"], st["best_hand_name"] = score, G.last_score.hand
+
     def legal_actions(self, G: "Game", actions: list[dict]) -> list[dict]:
         seat = self.turn if self.viewer is None else self.viewer
         out = []
@@ -265,12 +283,17 @@ class Coop(Mod):
     def state(self) -> dict[str, Any]:
         return {"turn": self.turn, "limits": list(self.limits), "shop_votes": list(self.shop_votes),
                 "pack_seat": self.pack_seat,
-                "decks": [{"remaining": len(s.deck.cards), "hand": len(s.hand.cards)} for s in self.seats]}
+                "decks": [{"remaining": len(s.deck.cards), "hand": len(s.hand.cards)} for s in self.seats],
+                "stats": [dict(st) for st in self.stats]}
 
     def seat_cards(self, seat: int) -> list["Card"]:
         """The seat's playing cards in its deck, hand and discard pile."""
         s = self.seats[seat]
         return [*s.deck.cards, *s.hand.cards, *s.discard.cards]
+
+
+def new_stats() -> dict[str, Any]:
+    return {"hands": 0, "chips": 0, "best_hand": 0, "best_hand_name": None, "discards": 0}
 
 
 def owner_of(card: Any) -> int | None:
