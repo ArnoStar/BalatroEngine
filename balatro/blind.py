@@ -36,6 +36,7 @@ class Blind:
         self.block_play = None
         self.loc_debuff_text = ""
         self.dissolve = None
+        self.mod_undo: T | None = None  # what a mod's blind changed when set (undone when disabled/defeated)
 
     def __repr__(self) -> str:
         return f"<Blind {self.name}>"
@@ -104,6 +105,9 @@ class Blind:
                     G.ev(lambda: G.jokers.shuffle("aajk"))
                     G.delay(0.5)
                 G.ev(shuffles, trigger="after", delay=0.2)
+        if not reset and blind is not None and blind.mod_item is not None:  # a content mod's blind
+            from .mods.content import blind_set
+            blind_set(self)
         for v in list(G.playing_cards):
             self.debuff_card(v)
         for v in list(G.jokers.cards):
@@ -163,6 +167,9 @@ class Blind:
                 v.flip()
         if self.name == "The Manacle" and not self.disabled:
             G.hand.change_size(1)
+        if self.mod_undo is not None:
+            from .mods.content import blind_defeat
+            blind_defeat(self)
 
     def get_type(self) -> str | None:
         if self.name == "Small Blind":
@@ -198,6 +205,9 @@ class Blind:
         if name == "The Manacle":
             G.hand.change_size(1)
             G.draw_from_deck_to_hand(1)
+        if self.mod_undo is not None:
+            from .mods.content import blind_disable
+            blind_disable(self)
         if name == "Violet Vessel":
             self.chips = self.chips / 3
 
@@ -294,6 +304,14 @@ class Blind:
                     return True
                 if not check:
                     self.only_hand = handname
+            item = self.config.blind.mod_item if self.config.blind else None
+            if item is not None:  # a content mod's blind
+                from .mods.content import blind_debuffs_hand, blind_hand_played
+                if blind_debuffs_hand(self, cards, hand, handname):
+                    self.triggered = True
+                    return True
+                if not check:
+                    blind_hand_played(self, cards, hand, handname)
         if self.name == "The Arm":
             self.triggered = False
             if G.GAME.hands[handname].level > 1:
@@ -367,6 +385,11 @@ class Blind:
             if d.nominal and d.nominal == card.base.nominal:
                 card.set_debuff(True)
                 return
+            if self.config.blind and self.config.blind.mod_item is not None:  # a content mod's blind
+                from .mods.content import blind_debuffs_card
+                if blind_debuffs_card(self, card):
+                    card.set_debuff(True)
+                    return
         if self.name == "Crimson Heart" and not self.disabled and card.area is G.jokers:
             return
         if self.name == "Verdant Leaf" and not self.disabled and card.area is not G.jokers:

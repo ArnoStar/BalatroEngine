@@ -45,6 +45,10 @@ class Back:
         GAME = G.GAME
         cfg = self.effect.config
         from .card import apply_to_run
+        if self.effect.center.mod_item is not None:  # a content mod's deck
+            from .mods.content import deck_apply
+            deck_apply(self)
+            return
         if cfg.voucher:
             GAME.used_vouchers[cfg.voucher] = True
             GAME.starting_voucher_count = (GAME.starting_voucher_count or 0) + 1

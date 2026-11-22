@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "id": "creative",
+  "name": "Creative Mode",
+  "version": "1.0.0",
+  "author": "BalatroEngine",
+  "description": "A sandbox to try the game's mechanics and other mods: during a run, change your money, hands, discards, hand size, slots, ante and hand levels, add any joker, consumable, voucher, tag or playing card (other enabled mods' too), edit or remove cards, win the blind. Each change goes through the game's own rules, so the run goes on exactly as the game would from there. Creative runs never count for statistics or unlocks.",
+  "tags": [
+    "creative",
+    "sandbox",
+    "example"
+  ],
+  "loc": {
+    "ru": {
+      "name": "Творческий режим",
+      "description": "Песочница для проверки механик игры и других модов: во время забега меняйте деньги, руки, сбросы, размер руки, ячейки, анте и уровни комбинаций, добавляйте любых джокеров, расходники, ваучеры, метки и игральные карты (в том числе из других модов), меняйте и убирайте карты, выигрывайте блайнд. Каждое изменение проходит через правила игры, и забег дальше идёт так же, как шёл бы в игре. Творческие забеги не идут в статистику и не открывают карты."
+    }
+  },
+  "creative": true
+}

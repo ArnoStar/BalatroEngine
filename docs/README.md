@@ -12,7 +12,7 @@ what the original game produces: every draw, shop, pack, score and dollar.
 | [API reference](api-reference.md) | look up every public class, method and function |
 | [State reference](state-reference.md) | read the run state: `G.GAME`, card areas, cards, blinds, tags, `snapshot()` |
 | [Front-end hooks](frontend-hooks.md) | build a user interface: feedback events, hand preview, sprites |
-| [Mods and game modes](mods.md) | change the rules for a game mode (PvP, coop), keeping a run without mods exact |
+| [Mods and game modes](mods.md) | content mods (JSON packages: jokers, consumables, vouchers, decks, blinds, rules, creative mode) and game modes (PvP, coop), keeping a run without mods exact |
 | [Internals](internals.md) | understand or change the engine: module map, event queue, frames, RNG, data |
 | [Verification](verification.md) | check the engine against the original game: oracle, fuzzing, scenarios, tests |
 

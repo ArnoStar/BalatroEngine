@@ -132,6 +132,17 @@ doesn't end the run, and `balatro.mods.pvp.match_state` turns two players'
 runs into hit points. `"coop"`: two players play one run in turns, each with
 their own deck, sharing the jokers (5 slots each), hands and discards. See [`docs/mods.md`](docs/mods.md).
 
+### Content mods
+
+A content mod is a JSON package (never code) that adds jokers, consumables,
+vouchers, decks, boss blinds and rules, or turns on creative mode:
+`Game(seed, mods=[package])`. Effects are triggers, conditions and actions,
+written with a small expression language (`card.rank == 7 and chance(1, 4)`).
+`balatro.mods.spec.validate(package)` explains what is wrong with one;
+`balatro.mods.examples()` has three examples (`fruit_stand`, `wild_rules`,
+`creative`). A run without content mods is still the original game. The
+format is in [`docs/mods.md`](docs/mods.md#content-mods).
+
 ### Seed analysis
 
 ```python
