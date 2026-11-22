@@ -233,12 +233,15 @@ def _text(v: _V, path: str, item: dict[str, Any]) -> None:
                         v.string(f"{p}.text[{i}]", line, 0, MAX_LINE)
 
 
-def _sprite(v: _V, path: str, s: Any, assets: dict[str, Any], kind: str) -> None:
+def _sprite(v: _V, path: str, s: Any, assets: dict[str, Any] | None, kind: str) -> None:
     if s is None:
         return
     if isinstance(s, str):
-        if s not in assets:
+        # (a package without its images, ``logic``, names them all the same: the engine doesn't draw)
+        if assets is not None and s not in assets:
             v.err(path, f"no asset named {s!r} in the package's assets")
+        elif not ASSET_NAME.match(s):
+            v.err(path, "an asset's name is lowercase letters, digits, _ . -")
         return
     if kind == "blind":
         if v.obj(path, s, ("blind",)):
@@ -484,13 +487,13 @@ def validate(pkg: Any) -> list[str]:
                 for k, hi in (("name", 60), ("description", 2000)):
                     if k in t:
                         v.string(f"loc.{lang}.{k}", t[k], 0, hi)
-    assets = pkg.get("assets", {})
-    if v.obj("assets", assets):
+    assets = pkg.get("assets")
+    if assets is not None and v.obj("assets", assets):
         if len(assets) > MAX_ASSETS:
             v.err("assets", f"has at most {MAX_ASSETS} images")
         for k, data in assets.items():
             _asset(v, f"assets.{k}", k, data)
-    else:
+    elif assets is not None:
         assets = {}
     if "rules" in pkg:
         _modifiers(v, "rules", pkg["rules"], "start")

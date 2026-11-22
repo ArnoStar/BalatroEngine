@@ -42,6 +42,16 @@ def test_the_examples_are_valid():
         assert validate(pkg) == []
 
 
+def test_a_package_without_its_images_plays():
+    from balatro.mods.spec import logic
+    assert "assets" not in logic(FRUIT) and validate(logic(FRUIT)) == []
+    G = Game("MODTEST", mods=[logic(FRUIT)]).start_run()
+    assert "j_fruit_stand_cherry_seven" in G.P_CENTERS
+    broken = copy.deepcopy(FRUIT)
+    del broken["assets"]["orchard"]
+    assert validate(broken) == ["jokers[2].sprite: no asset named 'orchard' in the package's assets"]
+
+
 def test_errors_name_the_place():
     bad = minimal(jokers=[{"key": "x", "name": "X", "config": {"mult": 1}, "effects": [
         {"on": "card_scored", "if": "cardd.rank == 7", "do": [{"mult": "self.mlt"}]},
