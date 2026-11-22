@@ -325,6 +325,9 @@ class Card:
         G.discover_card(G.P_CENTERS["e_" + self.edition.type] if self.edition else G.P_CENTERS["e_base"])
         name = ab.name
         GAME = G.GAME
+        if self.config.center.mod_item is not None and ab.set == "Joker":
+            from .mods.content import joker_added
+            joker_added(self, from_debuff)
         if ab.h_size != 0:
             G.hand.change_size(ab.h_size)
         if ab.d_size > 0:
@@ -371,6 +374,9 @@ class Card:
         ab = self.ability
         name = ab.name
         GAME = G.GAME
+        if self.config.center.mod_item is not None and ab.set == "Joker":
+            from .mods.content import joker_removed
+            joker_removed(self, from_debuff)
         if ab.h_size != 0:
             G.hand.change_size(-ab.h_size)
         if ab.d_size > 0:
@@ -602,6 +608,9 @@ class Card:
             return None
         ab = self.ability
         if ab.set == "Joker":
+            if self.config.center.mod_item is not None:
+                from .mods.content import joker_cash_out
+                return joker_cash_out(self)
             name = ab.name
             if name == "Golden Joker":
                 return ab.extra
@@ -989,6 +998,11 @@ _UPDATE_NAMES = frozenset(("Temperance", "Throwback", "Driver's License", "Steel
 def apply_to_run(G: "Game", self: Card | None, center: T | None = None) -> None:
     """Card:apply_to_run (also called as Card.apply_to_run(nil, center))."""
     GAME = G.GAME
+    mod_center = center if center is not None else self.config.center
+    if mod_center.mod_item is not None:  # a content mod's voucher
+        from .mods.content import voucher_redeem
+        voucher_redeem(G, self, mod_center)
+        return
     name = center.name if center is not None else self.ability.name
     extra = center.config.extra if center is not None else self.ability.extra
     if name in ("Overstock", "Overstock Plus"):

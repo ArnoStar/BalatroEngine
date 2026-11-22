@@ -1,0 +1,383 @@
+{
+  "format": 1,
+  "id": "wild_rules",
+  "name": "Wild Rules",
+  "version": "1.0.0",
+  "author": "BalatroEngine",
+  "description": "Two new decks, three boss blinds, Tarot, Spectral and Planet cards, two vouchers, and a house rule: interest is capped at $10 instead of $5. An example of everything a mod can add besides jokers.",
+  "tags": [
+    "decks",
+    "blinds",
+    "consumables",
+    "vouchers",
+    "rules",
+    "example"
+  ],
+  "loc": {
+    "ru": {
+      "name": "Дикие правила",
+      "description": "Две новые колоды, три босс-блайнда, карты Таро, спектральные и планеты, два ваучера и домашнее правило: потолок процентов $10 вместо $5. Пример всего, что мод добавляет кроме джокеров."
+    }
+  },
+  "rules": {
+    "interest_cap": 25
+  },
+  "decks": [
+    {
+      "key": "gardener",
+      "name": "Gardener's Deck",
+      "sprite": {
+        "atlas": "centers",
+        "x": 2,
+        "y": 2
+      },
+      "text": [
+        "Start with {C:money}$#1#{} more",
+        "and {C:attention,T:v_seed_money}Seed Money{}.",
+        "No {C:attention}2s{}, {C:attention}3s{} or {C:attention}4s{}"
+      ],
+      "vars": [
+        10
+      ],
+      "loc": {
+        "ru": {
+          "name": "Колода садовника",
+          "text": [
+            "На {C:money}$#1#{} больше в начале",
+            "и {C:attention,T:v_seed_money}Начальный капитал{}.",
+            "Без {C:attention}2{}, {C:attention}3{} и {C:attention}4{}"
+          ]
+        }
+      },
+      "start": {
+        "dollars": 10
+      },
+      "vouchers": [
+        "v_seed_money"
+      ],
+      "cards": {
+        "no_ranks": [
+          "2",
+          "3",
+          "4"
+        ]
+      }
+    },
+    {
+      "key": "duet",
+      "name": "Duet Deck",
+      "sprite": {
+        "atlas": "centers",
+        "x": 1,
+        "y": 3
+      },
+      "text": [
+        "Only {C:hearts}Hearts{} and {C:spades}Spades{}",
+        "{C:attention}+1{} hand size,",
+        "{C:blue}-1{} hand every round"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Колода дуэта",
+          "text": [
+            "Только {C:hearts}червы{} и {C:spades}пики{}",
+            "{C:attention}+1{} к размеру руки,",
+            "{C:blue}-1{} рука каждый раунд"
+          ]
+        }
+      },
+      "start": {
+        "hand_size": 1,
+        "hands": -1
+      },
+      "cards": {
+        "suits": [
+          "Hearts",
+          "Spades"
+        ]
+      }
+    }
+  ],
+  "blinds": [
+    {
+      "key": "toll",
+      "name": "The Toll",
+      "min_ante": 1,
+      "colour": "#c9a227",
+      "sprite": {
+        "blind": "bl_tooth"
+      },
+      "text": [
+        "Lose {C:money}$1{} per hand.",
+        "Play at least 3 cards"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Пошлина",
+          "text": [
+            "Теряйте {C:money}$1{} за руку.",
+            "Играйте не меньше 3 карт"
+          ]
+        }
+      },
+      "debuff_hand": "hand.count < 3",
+      "on_hand": [
+        {
+          "dollars": -1
+        }
+      ]
+    },
+    {
+      "key": "rot",
+      "name": "The Rot",
+      "min_ante": 2,
+      "colour": "#6b8e23",
+      "sprite": {
+        "blind": "bl_plant"
+      },
+      "text": [
+        "All enhanced cards",
+        "are debuffed"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Гниль",
+          "text": [
+            "Все улучшенные карты",
+            "ослаблены"
+          ]
+        }
+      },
+      "debuff_card": "card.enhancement != nil"
+    },
+    {
+      "key": "drought",
+      "name": "The Drought",
+      "min_ante": 3,
+      "colour": "#d2a24c",
+      "sprite": {
+        "blind": "bl_water"
+      },
+      "text": [
+        "-1 discard,",
+        "-1 hand size"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Засуха",
+          "text": [
+            "-1 сброс,",
+            "-1 к размеру руки"
+          ]
+        }
+      },
+      "on_set": [
+        {
+          "discards": -1
+        },
+        {
+          "hand_size": -1
+        }
+      ]
+    }
+  ],
+  "consumables": [
+    {
+      "key": "gardener",
+      "set": "Tarot",
+      "name": "The Gardener",
+      "sprite": {
+        "atlas": "Tarot",
+        "x": 6,
+        "y": 0
+      },
+      "config": {
+        "max": 2
+      },
+      "targets": {
+        "min": 1,
+        "max": 2
+      },
+      "text": [
+        "Enhances up to {C:attention}#1#{}",
+        "selected cards into",
+        "{C:attention,T:m_lucky}Lucky Cards{}"
+      ],
+      "vars": [
+        "self.max"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Садовник",
+          "text": [
+            "Улучшает до {C:attention}#1#{}",
+            "выбранных карт до",
+            "{C:attention,T:m_lucky}счастливых карт{}"
+          ]
+        }
+      },
+      "use": [
+        {
+          "modify": {
+            "enhancement": "m_lucky"
+          }
+        }
+      ]
+    },
+    {
+      "key": "harvest",
+      "set": "Tarot",
+      "name": "The Harvest",
+      "sprite": {
+        "atlas": "Tarot",
+        "x": 9,
+        "y": 0
+      },
+      "config": {
+        "per": 4,
+        "max": 20
+      },
+      "text": [
+        "Earn {C:money}$#1#{} per {C:attention,T:m_gold}Gold Card{}",
+        "in your full deck",
+        "{C:inactive}(Max of {C:money}$#2#{C:inactive})"
+      ],
+      "vars": [
+        "self.per",
+        "self.max"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Урожай",
+          "text": [
+            "{C:money}$#1#{} за каждую {C:attention,T:m_gold}золотую карту{}",
+            "в колоде",
+            "{C:inactive}(не больше {C:money}$#2#{C:inactive})"
+          ]
+        }
+      },
+      "can_use": "count_enhancement(full_deck, 'm_gold') > 0",
+      "use": [
+        {
+          "dollars": "min(self.max, self.per * count_enhancement(full_deck, 'm_gold'))"
+        }
+      ]
+    },
+    {
+      "key": "graft",
+      "set": "Spectral",
+      "name": "Graft",
+      "sprite": {
+        "atlas": "Spectral",
+        "x": 4,
+        "y": 4
+      },
+      "targets": {
+        "min": 1,
+        "max": 1
+      },
+      "text": [
+        "Add {C:dark_edition}Polychrome{} to",
+        "{C:attention}1{} selected card,",
+        "{C:red}-1{} hand size"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Прививка",
+          "text": [
+            "Добавляет {C:dark_edition}полихром{}",
+            "{C:attention}1{} выбранной карте,",
+            "{C:red}-1{} к размеру руки"
+          ]
+        }
+      },
+      "use": [
+        {
+          "modify": {
+            "edition": "polychrome"
+          }
+        },
+        {
+          "modify_run": {
+            "hand_size": -1
+          }
+        }
+      ]
+    },
+    {
+      "key": "pomona",
+      "set": "Planet",
+      "name": "Pomona",
+      "sprite": {
+        "atlas": "Planet",
+        "x": 6,
+        "y": 3
+      },
+      "hand": "Two Pair",
+      "loc": {
+        "ru": {
+          "name": "Помона"
+        }
+      }
+    }
+  ],
+  "vouchers": [
+    {
+      "key": "greenhouse",
+      "name": "Greenhouse",
+      "sprite": {
+        "atlas": "Voucher",
+        "x": 7,
+        "y": 2
+      },
+      "text": [
+        "{C:attention}+1{} hand size"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Теплица",
+          "text": [
+            "{C:attention}+1{} к размеру руки"
+          ]
+        }
+      },
+      "redeem": [
+        {
+          "modify_run": {
+            "hand_size": 1
+          }
+        }
+      ]
+    },
+    {
+      "key": "hothouse",
+      "name": "Hothouse",
+      "sprite": {
+        "atlas": "Voucher",
+        "x": 7,
+        "y": 3
+      },
+      "requires": [
+        "v_wild_rules_greenhouse"
+      ],
+      "text": [
+        "{C:dark_edition}+1{} Joker slot"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Оранжерея",
+          "text": [
+            "{C:dark_edition}+1{} ячейка джокера"
+          ]
+        }
+      },
+      "redeem": [
+        {
+          "modify_run": {
+            "joker_slots": 1
+          }
+        }
+      ]
+    }
+  ]
+}

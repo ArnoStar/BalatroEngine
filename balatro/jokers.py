@@ -45,6 +45,9 @@ def calculate_joker(self: "Card", context: T) -> Any:  # noqa: C901 - mirrors th
                 return T(message=MSG, Xmult_mod=G.P_CENTERS["v_observatory"].config.extra)
     if ab.set != "Joker" or self.debuff:
         return None
+    if self.config.center.mod_item is not None:  # a content mod's joker (balatro.mods.content)
+        from .mods.content import joker_calculate
+        return joker_calculate(self, context)
     name = ab.name
     jokers = G.jokers.cards
 

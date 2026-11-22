@@ -27,6 +27,7 @@ from .common import CommonMixin, new_run_profile
 from .events import EventManager
 from .lua import T, copy_table, to_T
 from .mods import Mod, make_mods
+from .mods.content import content_mods, deck_cards, extend_data
 from .progress import Profile, ProgressMixin
 from .rng import SEED_ALPHABET, PseudoRandom, lua_tostring, normalize_seed
 from .state_events import StateEventsMixin
@@ -120,8 +121,10 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
                  profile: Profile | None = None, hands_order: Iterable[str] | None = None,
                  game_speed: float = 1, normalize: bool = True, fast_forward: bool = True,
                  seeded: bool = True, mods: Iterable[Mod | str | dict] | None = None) -> None:
-        self.data = d = data_mod.load()
         self.mods: list[Mod] = make_mods(mods)
+        content = content_mods(self.mods)
+        # (content mods add their items to a copy of the game's tables)
+        self.data = d = extend_data(data_mod.load(), content) if content else data_mod.load()
         self.P_CENTERS = d.P_CENTERS
         self.P_CARDS = d.P_CARDS
         self.P_BLINDS = d.P_BLINDS
@@ -134,7 +137,7 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         self.profile = (profile or Profile.everything()).copy()
         self.PROFILE = new_run_profile()
         self.seeded = seeded
-        self.unlocking = not seeded and challenge is None
+        self.unlocking = not seeded and challenge is None and not content
         self.P_LOCKED: list[T] = []
         self._hands_order = list(hands_order) if hands_order is not None else list(DEFAULT_HANDS_ORDER)
 
@@ -455,6 +458,8 @@ class Game(CommonMixin, StateEventsMixin, ButtonsMixin, ActionsMixin, ProgressMi
         G = self
         sp = G.GAME.starting_params
         de = challenge.deck if challenge is not None and challenge.deck else None
+        if de is None and G.GAME.selected_back is not None:
+            de = deck_cards(G.GAME.selected_back.effect.center)  # (a mod's deck)
         if de is not None and de.cards:
             protos = [T(v) for v in de.cards]
         else:

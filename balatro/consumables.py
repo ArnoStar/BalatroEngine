@@ -19,6 +19,11 @@ def use_consumeable(self: "Card", area: Any, copier: "Card | None" = None) -> No
         G.set_consumeable_usage(self)
     if self.debuff:
         return None
+    item = self.config.center.mod_item
+    if item is not None and item.use is not None:  # a content mod's consumable with its own use
+        from .mods.content import consumable_use
+        consumable_use(self, copier)
+        return None
     used_tarot = copier or self
     ab = self.ability
     cons = ab.consumeable
@@ -329,6 +334,10 @@ def can_use_consumeable(self: "Card", any_state: Any = None, skip_check: Any = N
         ab = self.ability
         cons = ab.consumeable
         name = ab.name
+        item = self.config.center.mod_item
+        if item is not None and item.use is not None:
+            from .mods.content import consumable_can_use
+            return consumable_can_use(self)
         if name == "The Hermit" or cons.hand_type or name == "Temperance" or name == "Black Hole":
             return True
         if name == "The Wheel of Fortune":

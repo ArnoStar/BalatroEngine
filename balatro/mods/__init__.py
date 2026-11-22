@@ -111,11 +111,15 @@ def registry() -> dict[str, type[Mod]]:
 
 
 def make_mod(spec: "Mod | str | dict[str, Any]") -> Mod:
-    """A mod from its key (``"pvp"``), its spec (``{"key": "coop", "players": 2}``) or itself."""
+    """A mod from its key (``"pvp"``), its spec (``{"key": "coop", "players": 2}``), a content
+    mod's package (``{"format": 1, "id": ...}``, balatro.mods.content) or itself."""
     if isinstance(spec, Mod):
         return spec
     if isinstance(spec, str):
         spec = {"key": spec}
+    if "format" in spec:  # a content mod's package (balatro.mods.content)
+        from .content import ContentMod
+        return ContentMod(dict(spec))
     options = dict(spec)
     key = options.pop("key", None)
     mods = registry()
@@ -128,4 +132,18 @@ def make_mods(specs: Iterable["Mod | str | dict[str, Any]"] | None) -> list[Mod]
     return [make_mod(s) for s in specs or ()]
 
 
-__all__ = ["Mod", "make_mod", "make_mods", "registry"]
+def examples() -> dict[str, dict[str, Any]]:
+    """The example content mods that come with the engine (id: package):
+    ``fruit_stand`` (jokers with their own art), ``wild_rules`` (decks,
+    blinds, consumables, vouchers, rules) and ``creative`` (creative mode)."""
+    import json
+    from pathlib import Path
+    folder = Path(__file__).with_name("examples")
+    out: dict[str, dict[str, Any]] = {}
+    for f in sorted(folder.glob("*.json")):
+        pkg = json.loads(f.read_text())
+        out[pkg["id"]] = pkg
+    return out
+
+
+__all__ = ["Mod", "make_mod", "make_mods", "registry", "examples"]

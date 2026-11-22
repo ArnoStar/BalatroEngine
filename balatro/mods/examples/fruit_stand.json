@@ -1,0 +1,335 @@
+{
+  "format": 1,
+  "id": "fruit_stand",
+  "name": "Fruit Stand",
+  "version": "1.0.0",
+  "author": "BalatroEngine",
+  "description": "Six fresh jokers with their own art. An example of what a mod's jokers can do: score on cards, draw chances, keep values that grow, retrigger cards, pay at cash out, change the run while they are there and make new cards.",
+  "tags": [
+    "jokers",
+    "example"
+  ],
+  "loc": {
+    "ru": {
+      "name": "Фруктовая лавка",
+      "description": "Шесть свежих джокеров со своими рисунками. Пример того, что умеют джокеры модов: очки за карты, шансы, растущие значения, повторы карт, деньги при выплате, изменения забега и новые карты."
+    }
+  },
+  "jokers": [
+    {
+      "key": "cherry_seven",
+      "name": "Cherry Seven",
+      "rarity": 1,
+      "cost": 5,
+      "sprite": "cherry_seven",
+      "config": {
+        "mult": 7,
+        "odds": 7,
+        "money": 7
+      },
+      "text": [
+        "Each played {C:attention}7{} gives",
+        "{C:mult}+#1#{} Mult when scored,",
+        "{C:green}#2# in #3#{} chance to",
+        "also earn {C:money}$#4#{}"
+      ],
+      "vars": [
+        "self.mult",
+        "game.probability",
+        "self.odds",
+        "self.money"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Вишнёвая семёрка",
+          "text": [
+            "Каждая сыгранная {C:attention}7{}",
+            "даёт {C:mult}+#1#{} к множителю,",
+            "шанс {C:green}#2# из #3#{}",
+            "получить ещё {C:money}$#4#{}"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "card_scored",
+          "if": "card.rank == 7",
+          "do": [
+            {
+              "mult": "self.mult"
+            }
+          ]
+        },
+        {
+          "on": "card_scored",
+          "if": "card.rank == 7 and chance(1, self.odds)",
+          "do": [
+            {
+              "dollars": "self.money"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "banana_bunch",
+      "name": "Banana Bunch",
+      "rarity": 2,
+      "cost": 6,
+      "sprite": "banana_bunch",
+      "config": {
+        "xmult": 3,
+        "odds": 6
+      },
+      "eternal_compat": false,
+      "text": [
+        "{X:mult,C:white} X#1# {} Mult",
+        "{C:green}#2# in #3#{} chance this",
+        "card is eaten at",
+        "the end of the round"
+      ],
+      "vars": [
+        "self.xmult",
+        "game.probability",
+        "self.odds"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Связка бананов",
+          "text": [
+            "{X:mult,C:white} X#1# {} множитель",
+            "Шанс {C:green}#2# из #3#{}, что",
+            "карту съедят",
+            "в конце раунда"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "score",
+          "do": [
+            {
+              "xmult": "self.xmult"
+            }
+          ]
+        },
+        {
+          "on": "round_end",
+          "if": "chance(1, self.odds)",
+          "do": [
+            {
+              "destroy_self": true
+            },
+            {
+              "message": "k_eaten_ex"
+            }
+          ],
+          "else": [
+            {
+              "message": "k_safe_ex"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "orchard",
+      "name": "Orchard",
+      "rarity": 1,
+      "cost": 5,
+      "sprite": "orchard",
+      "config": {
+        "chips": 0,
+        "gain": 4
+      },
+      "text": [
+        "This Joker gains {C:chips}+#2#{} Chips",
+        "for each {C:hearts}Heart{} discarded",
+        "{C:inactive}(Currently {C:chips}+#1#{C:inactive} Chips)"
+      ],
+      "vars": [
+        "self.chips",
+        "self.gain"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Сад",
+          "text": [
+            "Джокер получает {C:chips}+#2#{} фишек",
+            "за каждую сброшенную {C:hearts}черву{}",
+            "{C:inactive}(сейчас {C:chips}+#1#{C:inactive} фишек)"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "discard",
+          "if": "is_suit(card, 'Hearts') and not card.debuffed",
+          "do": [
+            {
+              "set": {
+                "chips": "self.chips + self.gain"
+              }
+            },
+            {
+              "message": "k_upgrade_ex"
+            }
+          ]
+        },
+        {
+          "on": "score",
+          "if": "self.chips > 0",
+          "do": [
+            {
+              "chips": "self.chips"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "fruit_salad",
+      "name": "Fruit Salad",
+      "rarity": 3,
+      "cost": 8,
+      "sprite": "fruit_salad",
+      "config": {
+        "times": 1
+      },
+      "text": [
+        "Retrigger every scored card",
+        "if the scored cards have",
+        "{C:attention}all four suits{}"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Фруктовый салат",
+          "text": [
+            "Повтор каждой засчитанной",
+            "карты, если среди них",
+            "есть {C:attention}все четыре масти{}"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "retrigger_scored",
+          "if": "count_suit(scoring, 'Hearts') > 0 and count_suit(scoring, 'Spades') > 0 and count_suit(scoring, 'Clubs') > 0 and count_suit(scoring, 'Diamonds') > 0",
+          "do": [
+            {
+              "retrigger": "self.times"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "market_stall",
+      "name": "Market Stall",
+      "rarity": 2,
+      "cost": 6,
+      "sprite": "market_stall",
+      "config": {
+        "per": 2
+      },
+      "passive": {
+        "consumable_slots": 1
+      },
+      "text": [
+        "{C:attention}+1{} consumable slot.",
+        "Earn {C:money}$#1#{} per consumable",
+        "held at the end of the round"
+      ],
+      "vars": [
+        "self.per"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Прилавок",
+          "text": [
+            "{C:attention}+1{} ячейка расходников.",
+            "{C:money}$#1#{} за каждый расходник",
+            "в конце раунда"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "cash_out",
+          "if": "game.consumable_count > 0",
+          "do": [
+            {
+              "dollars": "self.per * game.consumable_count"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "seed_packet",
+      "name": "Seed Packet",
+      "rarity": 2,
+      "cost": 6,
+      "sprite": "seed_packet",
+      "config": {
+        "rounds": 0,
+        "every": 3
+      },
+      "text": [
+        "Every {C:attention}#2#{} blinds selected,",
+        "create a {C:planet}Planet{} card",
+        "{C:inactive}(#1#/#2#, needs room)"
+      ],
+      "vars": [
+        "self.rounds",
+        "self.every"
+      ],
+      "loc": {
+        "ru": {
+          "name": "Пакет семян",
+          "text": [
+            "Каждый {C:attention}#2#-й{} выбранный блайнд",
+            "создаёт карту {C:planet}планеты{}",
+            "{C:inactive}(#1#/#2#, если есть место)"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "on": "blind_selected",
+          "if": "self.rounds + 1 >= self.every",
+          "do": [
+            {
+              "set": {
+                "rounds": 0
+              }
+            },
+            {
+              "create": {
+                "set": "Planet"
+              }
+            },
+            {
+              "message": "k_plus_planet"
+            }
+          ],
+          "else": [
+            {
+              "set": {
+                "rounds": "self.rounds + 1"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "cherry_seven": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAAED0lEQVR42u3dPYoUURQG0F6I4BIMxGQSc7dgaOQWXMII5i7BNbgImURMxA2YuIIWhAGRbru6+v3ce99puJl8TNU94Bv6q6nDYePn7u7V0dSfQ+uPmwrOLiC/fn43C8xuUOCAcxUcUMwWSOCYtnDcLPM/QOAYcAw4JgscYMwuQOCYrnCev/lkFhhwTCw4r98/bJq3H3/8ma3/Xs7cHHDk5IRjQTlzwJGTC44F5c4BR04OOBZUIwccObHhWFCtHHDkxIRjQTVzwJETE44F1cwBR04tOBYUOwccOTXgWFCOHHDkKHLJ0QC0KHAsSJELHDkagHI0AOVoAFqQIhc44ChyyQFHjgagHA1AiwJHkUuRCxw5ilxyNADlgGNBilzggKPIJQccORqAcjQALQocRS5FLnDkaADK0QCUowFoQQ/Hl/d3J0eRCxxwFLna57SGowEIDjiKXP3hKHKBA44i12Ugt8JR5AIHHEWu/nAUucABR5GrPxxFLnDAUeTa/+v11n+vyAUOOIpc/eEocoEDjiJXfziKXOCAo8g1roCV5asIcMDRAKxQwMryVQQ44GgAVihgZfkqAhxwNAArP74S7ecBBxwNwMqPr0T7ecABR5Gr8uMr0X4ecMDRAFzx4f9ZhTBwwNEAXPHh/1mFMHDA0QBc8eH/WYUwcMBZqwH47cWzJpPlEDz6ess2AMEpDqfXjZ0NZ/R/TaOut3wDEJzicHrd2FlwZh2Ce1/vMg1AcMDZdQg+3r87Ob1u8OxD8OjrBQecNeBsPQSPupFRDsHggAPOiCLXrBsZ7RAMDjjgjChyZbmRrQ7T0a83TQMQHHBKHxZbHaajXm+6BiA44JQ+LLY6TEe73rQNQHAWh9P6sNh7Zn3pGeV60zcAwVkUTq/D4mw40Qtqvb9iAQecmHB6HRZnwen9VcSs6y3XAAQHnJCHxQ9Pn5yc7I/B3Hq94ICzBpzRh8VLNzLrYzDggANOxMPiuRuZ/TEYcMABZ0Th6dyNiXYIbvVLwq3Xu9zfAARnUTi9vorYeyOjvx5pNpwyfwMQnMXg9C48XXsjs7yIbRaccn8DEJxF4FR9bfSqOeDI8RZgOd4CbFGrw7GgmjngyPEWYDneAmxR4FhQxRxw5HiZqxxvAbYocCyoYg44crwFWM64HHDkeAuwnHE54MjRAJSjAWhRGoAWpMgFjhxFLjkagHLAsSBFLnDAUeSSA44cDUA5GoAWBY4ilyIXOHI0AOVoAMrRALQgRS5wwFHkkqMBKEcDUI4GoEWBo8ilyAWOHEUuORqAcsCxIEUucMDpA8fUHnBMDDjGgGNuh/P4AchcBQYcA44BxySD8zhfv3w25vivC3BMGzjnAIG0NpSLYMAxN8G5FpSpNYfWHzcVnL8/vwHe1/oM7FqH3gAAAABJRU5ErkJggg==",
+    "banana_bunch": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAADiElEQVR42u3dsU0DMRQG4FuCBZiAOhILhDHYgDIrMAFMwA7pWICOjg0ogAWChBQJUAJ3F5/tZ38nvQ79EnlfYcIv3zCMfFar9c60P0Pqx4cKziwg768vpoOZDQoccCbBAcWMgQSOSQvHh2X+AgSOAceAY6LAAcbMAgSOWRTO2c216WDAMXXBuby/HTVXD3dfM/bn5ZTNAUdOTDgWFDMHHDmx4FhQ7Bxw5MSAY0Ft5IAjp244FtRWDjhy6oRjQW3mgCOnTjgW1GYOOHLagmNBdeeAI6cNOBYUIwccOYpccjQALQocC1LkAkeOBqAcDUA5GoAWpMgFDjiKXHLAkaMBKEcD0KLAUeRS5AJHjiKXHA1AOeBYkCIXOOAocskBR44GoBwNQIsCR5FLkQscORqAcjQA5WgAWpAiFzjgKHLJ0QCUowFo0YpcFgWOIlfenM36fNJoAIIDDjDzc1LD0QAEp284wOSBowEITt9wgPk5H48XB6fUIVgDEBwNwJZzUsPRAASnbzjA5IGjAQhO33CAGQdk6mgAggOOIld+OBqA4ICjyLU8HEUucMBR5JoPZPe2OThjD8fuAAQHHIfg+uBoAILjDkCH4OXhaACC0zcch+C6D8EagOBoADoEuwMQHHD6LnK1egjWAARHAzBHTqp/QkY/BGsAgqMBmCMnGhwNQHDAiVzkigJHkQsccEoWuVIt3CEYHHA0AMHxMldwwKmpyNUqHC9zBQecHEWuUhAcgoM3AMEBp+hX/w7BnTUAwQGn6Ff/DsGdNQDB6RzO3EPwsUUtPbVdnaYBCA44KYtc0eB4mSs44ERuAEaB4zJMcMBpuQG49J/XXsTWaAMQHHBm/SKl4QADDjg9NQBLwQEGHHDcAShHA9CiwHGVW3854MhxB6AcDUCLAseCFLnAkeMqNznuAJTjDkALUuQCBxwvc5UDjhx3AMrRALQocLzMVZELHDkagHI0AOVoAFqQIhc44ChyydEAlKMBKEcD0KLAUeRS5AJHjgagHA1AOeBYkCIXOOAocskBR44GoEUrclkUOIpcilzgyNEAlKMBaFHgWJAiFzhyFLnkaADK0QC0IEUuiwJHkUsOOHI0AOUoclkUOIpcilzgyMkPx7Q94Jg64BgDjjkdzv4ByEwCA44Bx4BjgsHZz/PT1pjdbxfgmDRwjgECqW8o/4IBx5wEZyoo09YMqR8fKjjfn0/H1uRKf5/2BQAAAABJRU5ErkJggg==",
+    "orchard": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAAD00lEQVR42u3dMW4UQRAF0D2IJSRfwJETJ843cUrIORwRIgJCn4GIkMSHIEMk3MAJJ1gkJEsG7Zjp3p7e7qq3UmXWl2frBW35a3q3W/m5udkfTPzZtf74UsGpAvLr6adJMNWgwAGnCA4oZg0kcExbOL4s8xogcAw4BhwzCxxgTBUgcMymcN69vzQJBhwzFpwPn/er5uHr2z+z9uflnDcHHDlzwrGgOXPAkTMXHAuaOwccOXPAsaAYOeDIGRuOBcXKAUfOmHAsKGYOOHLGhGNBMXPAkRMLjgWNnQOOnBhwLGiOHHDkKHLJ0QC0KHAsSJELHDkagHI0AOVoAFqQIhc44ChyyQFHjgagHA1AiwJHkUuRCxw5ilxyNADlgGNBilzggKPIJQccORqAcjQALQocRS5FLnDkaADK0QCUowFoQYpc4ICjyCVHA1COBuBYX+z9/vLoKHKBA44iV/ucU+EocoEDjiLX+pxaOIpc4ICjyLX9Ifjuy23RKHKBA07GIlerQ/CpcBS5wAEnQ5Gr1SG4Fo4iFzjgzFDk+nF91WSW4Cz9fCmQpVnK1wAEB5wRi1zZ4WgAgpMbTu9DXlY4GoDggLNlkWvpCz58vD86rUCNNopc4IDTo8gFTt2f6ekbgOCA0/QQDI4GIDjg9DsEZ4NTCipNAxAccLocgsE5DiddAxAccLocgsH5G07aBiA44FQ9iD+7x/xXBDjgxGwAgjPmvyLAASdmAxCcMf8VAQ44MRuAEPSBE64BCAE4VQ8CwbZwwjYAIQCn6kEg2AZO+AYgBOCc9SUCUefTm4ujowEIBzjnfIlAdjgagCY3nN4vEcgKRwPQ5IbT6kEA6XMIDvcOQHCSwGn9IOD0OQSHewcgOMHhbPUg4PQ5BIMDjncA9jg0Ly1qaaIegsEBxzsAwXGZKzjgjHGZa3Q4LnMFB5wZLnMthVD6+5Tmz36tNjjguAX4tZytF7tVvstcwQFnxstcZ4PjMldwwJnhMlc5GoAWBY4FRcsBR45bgOVoAFpUdjgWFDMHHDkagHI0AC0KHAuKmAOOHEUuORqAFgWOBUXMAUeOBqAcDUCLAseCFLnAkaPIJUcDUI4GoAUpcoEDjiKXHHDkaADKUeSyKHAUuRS5wJGjyCVHA1COBqAFKXKBA44ilxwNQDkagHI0AC0KHEUuRS5w5GgAytEAlKMBaEGKXOCAo8glRwNQjgagRStyWRQ4a+GY2AOOGQOOMeCY0+E8fwAyRWDAMeAYcMxkcJ7n+7dHYw7/ugDHtIGzBAik3FD+CwYccxKcUlAm1uxaf3yp4Lz8/AZgVet2dBmpxwAAAABJRU5ErkJggg==",
+    "fruit_salad": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAAECUlEQVR42u3dPYpTURgG4CzGXhubNMKUNu7B0hW4hqzA0kXY2YjVWNkNNjbWgjobGEEIDCHX3HPznf/nwtfJy0m+h+GALze73cpnv3/5YMafXfTjSwVnE5A/P7+bCWYzKHDASYIDilkDCRwTC8eXZf4HCBwDjgHH9AIHGLMJEDgmK5z3N6/NBAOOaQvO7ZvDqrl7++7frP33curmgCOnTzgW1GcOOHL6gmNBfeeAI6cPOBY0Rg44ctqGY0Fj5YAjp004FjRmDjhy2oRjQWPmgCNnLDgW1HYOOHLGgGNBfeSAI0eRS44GoEWBY0GKXODI0QCUowEoRwPQghS5wAFHkUsOOHI0AOVoAFoUOIpcilzgyFHkkqMBKAccC1LkAgccRS454MjRAJSjAWhR4ChyKXKBI0cDUI4GoBwNQAtS5AIHHEUuORqAcjQALVqRy6LAGaXI9e3507NT6zz3n5+dHUUucMAZoch1CU7p81yCo8gFDjg9F7mW4NQ6zxIcRS5wwOmpyLUEJHVyX4JTRwMQHHBaLHKVgnPtJTgajgYgOHPDae0SHAUn6hIcBUcDEJy54UR/kBeH/dkpDed4nt+HJ2enNBwNQHDmhpPrg9SGc3qe2nA0AMEBJ2eRqxacpfPUgqPIBQ44kUWuJSCpE1XkWgKSOlFFrsOr27MzfQMQHHBCL8Gl4Ky9BJeCc3qerXCGbwCCA07oJTg3nNRLcG44S+dJhTNNAxAccEI/SCqQqMtibjipl+DUmb4BCM6kcK79kxkNZ+15SsFZewkuBWeYBiA4k8GJupxFwUk9T244qZfg3HCGawCCMwmcSwv68sHUnG4bgJYHzqYil+W1Aae7BqDlgbPpvxwsr+50W+SyPHBC4fz68ckEztrLMTgGHAMOOOCAAw444IzSAASqLpBuG4DggLOpzgBOG3C6awCCA86m4hQ4deF02wAEZ3I40a/jAKrMJXi4dwCCMzicXC/+AafMJRgccLwDEJxyl2BwwPErwCqo5S7B4IDjV4DBKXcJBgccvwIMTrlLMDjgeAegnPo54MjxK8By/AqwRYFjQSPmgCNnrgagnLo54MiZqwEop24OOHLmagDKqZsDjhwNQDkagBYFjgWNmAOOHEUuORqAFgWOBSlygSNHA1COBqAcDUALUuQCBxxFLjngyNEAlKMBaFHgKHIpcoEjR5FLjgagHHAsSJELHHAUueSAI0cDUI4GoEWBo8ilyAWOHA1AORqAcjQALUiRCxxwFLnkaADK0QC0aEUuiwJHkUuRCxw5ilxyNAAtamY4ZuwBx7QBxxhwzPVwjg9AJgkMOAYcA47pDM5x7r5+NObh1AU4JgbOEiCQ5oZyEQw45io4qaDMWLOLfnyp4Dx+/gKIOnWBgPUtfAAAAABJRU5ErkJggg==",
+    "market_stall": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAAEBElEQVR42u3cMW4TURSFYa+BJSB6aGjc0KI07IWSJXgJdHRZAB0dFanogIYdUEA2ECQkS5HlwTPPb+z77v1GOp11NJrzJ3qSf89mM/Pabm8eJH82vS8PFThNgPz59VMKpBko4ABnEThAkTkgAUf6guNhyf8AAo4AR4Ajo4ADGGkCCDiyKjgf3j6RAgGOxALn7v12Vr7fvv6XuZ/Xc90e4OgZExwDjdkDHD1jgWOgsXuAo2cMcAyUowc4emKDY6BcPcDRExMcA+XsAY6emOAYKGcPcPTkAsdAsXuAoycHOAYaowc4eohcehiAhgKOgYhcwNHDANTDANTDADQQkQs4wCFy6QGOHgagHgagoYBD5CJyAUcPkUsPA1APcAxE5AIOcIhceoCjhwGohwFoKOAQuYhcwNHDANTDANTDADQQkQs4wCFy6WEA6mEAGprIZSjgELmIXMDRQ+TSwwA0FHBO58fL54ty93G3KPpPBDjAKQHO/l+mYccAJ5wBaFjgNIlcho0NTlgD0LDAaRK5DBsTnPAGoGGB0yRyGTYWOMMYgIYFTpPIZdgY4AxnABoWOF1Frnc3T6VjyhiAxgZO09f+xl4XnLQGoLGB0yQYGXsdcNIbgMYGTpPKuPYhL2vP1HMr8w5A4ACn6YGsfcjL2rP0Dy7dOwCBA5ymB7L2IS9rT29whnsHIHCAc5FD3uSXfhP9959fHM3U53/vnh3N1P282h3PVP/uzZejuRY4w74DEDjFwbnUIW8uOPv76QXO1OfngrO/n3PBOfVVTZl3AAKnKDiXPuSdAufwfq4NzuH9tIIz96uaMu8ABE5RcNYSubopqAsPzb1A6wXg0sN3r68igAOcXOC0HvKA0wZOGQMQOMDpesgDDnCAA5z+Ipe0pbwBKMXBaRW5pO8P8soYgFIUnHNFLrksOGkMQCkGTrSfeWTtYQACpzY4UX/mkbWHAQicmuBE/5lH1h4GIHBqghP9kJe1xzsAgQOciIe8rD3eAQgc4EQ85GXt8Q5A4ADH0Hl6gKMnpwFo6Jg9wNGT0wA0dMwe4OjJaQAaOmYPcPTkNAANHbMHOHpyGoCGjtkDHD05DUBDx+wBjp6cBqChY/YAR09OA9DQMXuAo4fIpYcBaCjgGIjIBRw9DEA9DEA9DEADEbmAAxwilx7g6GEA6mEAGgo4RC4iF3D0ELn0MAD1AMdARC7gAIfIpQc4ehiAehiAhgIOkYvIBRw9DEA9DEA9DEADEbmAAxwilx4GoB4GoKGJXIYCDpGLyAUcPUQuPQxAQ1UGR3IHOBIDHBHgyPng7C8AySJggCPAEeDIYODs8+3rJ5GHQy6AI33AmQIISLVBOQkMcOQscJYCJbmy6X15qMB5fP0Fkzhp9xpPOhMAAAAASUVORK5CYII=",
+    "seed_packet": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAI4AAAC+CAYAAADjhzelAAADy0lEQVR42u3dMWobQRiGYZ0jBAI+hpqAS5Uu3bgPOUDICYILk+MYXBrSukuXG6TJCRwwCITQWju7o93/n3kE05kP2/MU6+RF2mxGvrbb3avT/tnUfvmlgjMJyL+/f5wOzmRQ4IBTBAcUZwwkcJy6cPyynPcAgeOA44DjZIEDjDMJEDjOReHcXP90OjjgOLHgfP/yOOr8+Pbr7Yz9ejvr7oBjJyccF5RzBxw7ueC4oNw74NjJAccFtbEDjp3YcFxQWzvg2IkJxwW1uQOOnZhwXFCbO+DYaQuOC4q9A46dNuC4oBw74NgRctlRALoocFyQkAscOwpAOwpAOwpAFyTkAgccIZcdcOwoAO0oAF0UOEIuIRc4doRcdhSAdsBxQUIucMARctkBx44C0I4C0EWBI+QScoFjRwFoRwFoRwHogoRc4IAj5LKjALSjAKzzC/l8vy06wIADjgJw+s5cOMCAA44CcPzOVDjAgAOOArD8Ifjr893JU+uhWcgFDjg9FoBR4Ai5wAGnhwJwbThCLnDAUQDW+y+Hoa8XcoEDjgJwOThCLnDAUQDGhyPkAgccb+XmIRgccBSAER6m5RXggKMAXO5hWsgFDjgKwIOzu2ryCLnAASfkW7k1CkfIBQ44Id/KDRwFIDjgLPfn5MAv/uHTxxSnFhwFIDh9w1nsz8nO4SgAwekbzuL/cNUpHAUgOOCsEnIVwhnaud1+OHmGvp+hrx/arwVHyAUOOKuGXBeGM/fr9z/XXDhCLnDACRFyBYVz/HNNhSPkAgecDCFXKZxaD8FDO6VwhFzggJMp5BoL59z3U/oQfOk/xxWA4IATMeQ6B2fs91P6ELw2HAUgOArASCFXrYfgtf7LQQEIDjiZQq5aD8FR4CgAwVEARg65aj0Erw1HAQgOOBlCruzpqJALHHAyhVxZ4Qi5wAEnY8iVDY6QCxxwvJWbt3IDBxwFoDdWUgCCA463cvNWbuCA0/qHudpRANpRALogH+YKDjgtfpirHQWgHQWgC/JhruCA48Nc7YBjRwFoR8jlosCJFXLZUQC6KHBcUGs74NhRANpRALoocFyQkAscO0IuOwpAOwpAFyTkAgccIZcdcOwoAO0IuVwUOEIuIRc4doRcdhSAdhSALkjIBQ44Qi47CkA7CkA7CkAXBY6QS8gFjh0FoB0FoB0FoAsScoEDjpDLjgLQjgLQRQu5XBQ4Y+E4bR9wnBhwHAccZz6c/QsgpwgMOA44DjhOMjj78/vlyXFej12A49SBMwQIpL6hnAUDjjMLTikop62zqf3ySwXn8PUfgPmpXqj34ycAAAAASUVORK5CYII="
+  }
+}
