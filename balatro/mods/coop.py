@@ -11,11 +11,16 @@
   starts with the player who didn't play last.
 - **The shop**: both buy (for themselves: a joker goes in their half, a pack
   is theirs to open: they choose its cards, and the hand's cards it is used
-  on); the shop is left once both players have asked to leave it.
-- **Rules** (option ``rules``): ``2`` (the default) is the above; ``1``, the
-  rules until engine 0.9.0, is ``decks="own"`` and ``blinds="linear"`` (a run
-  replays with the rules it was started with). ``decks`` and ``blinds`` can
-  also be given on their own.
+  on); the shop is left once both players have asked to leave it. A player's
+  ask holds until the shop is left, a pack the other opens meanwhile included.
+- **Rules** (option ``rules``): ``3`` (the default) is the above; ``2``, the
+  rules of engine 0.9.0, is ``votes="reset"``; ``1``, the rules until engine
+  0.9.0, is also ``decks="own"`` and ``blinds="linear"`` (a run replays with
+  the rules it was started with). ``decks``, ``blinds`` and ``votes`` can also
+  be given on their own.
+- **Votes** (option ``votes``): ``"kept"`` (rules 3) is the above;
+  ``"reset"`` (rules 1 and 2): a pack opened in the shop drops the asks to
+  leave it (a player who had asked must ask again).
 - **Decks** (option ``decks``): ``"shared"`` (rules 2) is the above;
   ``"own"``, the rules until engine 0.9.0 (runs started with them replay with
   them): each player has their own deck, with its hand and discard pile (the
@@ -56,8 +61,11 @@ BLIND_STEEPNESS = 0.1
 TURN_COMMANDS = ("play", "discard", "sort", "select_blind", "skip_blind", "reroll_boss")
 DECKS = ("shared", "own")
 BLINDS = ("steep", "linear")
-RULES = {1: {"decks": "own", "blinds": "linear"}, 2: {"decks": "shared", "blinds": "steep"}}
-LATEST_RULES = 2
+VOTES = ("kept", "reset")
+RULES = {1: {"decks": "own", "blinds": "linear", "votes": "reset"},
+         2: {"decks": "shared", "blinds": "steep", "votes": "reset"},
+         3: {"decks": "shared", "blinds": "steep", "votes": "kept"}}
+LATEST_RULES = 3
 
 
 class Seat:
@@ -80,12 +88,16 @@ class Coop(Mod):
             raise ValueError(f"coop's rules are one of {', '.join(map(str, RULES))}")
         decks = options.get("decks", RULES[rules]["decks"])
         blinds = options.get("blinds", RULES[rules]["blinds"])
+        votes = options.get("votes", RULES[rules]["votes"])
         if decks not in DECKS:
             raise ValueError(f"coop's decks are one of {', '.join(DECKS)}")
         if blinds not in BLINDS:
             raise ValueError(f"coop's blinds are one of {', '.join(BLINDS)}")
+        if votes not in VOTES:
+            raise ValueError(f"coop's votes are one of {', '.join(VOTES)}")
         self.own_decks = decks == "own"  # each player's own deck (rules 1)
         self.steep_blinds = blinds == "steep"
+        self.kept_votes = votes == "kept"  # a pack opened in the shop keeps the asks to leave it (rules 3)
         self.seats: list[Seat] = []  # (own decks: each player's card areas)
         self.turn = 0  # whose turn it is
         self.active = 0  # whose card areas are the game's (G.hand, G.deck, G.discard)
@@ -275,7 +287,7 @@ class Coop(Mod):
             self.pack_seat = None
             if G.STATE in (S.SHOP, S.BLIND_SELECT, S.ROUND_EVAL) and self.active != self.turn:
                 self.use(G, self.turn)  # (own decks: the turn's areas again)
-        if not G.in_shop():
+        if not G.in_shop() and not (self.kept_votes and G.in_pack()):
             self.shop_votes = []
 
     def own_decks_after(self, G: "Game", c: str | None) -> None:
@@ -327,7 +339,7 @@ class Coop(Mod):
     def state(self) -> dict[str, Any]:
         return {"turn": self.turn, "limits": list(self.limits), "shop_votes": list(self.shop_votes),
                 "pack_seat": self.pack_seat, "decks_mode": "own" if self.own_decks else "shared",
-                "blinds": "steep" if self.steep_blinds else "linear",
+                "blinds": "steep" if self.steep_blinds else "linear", "votes": "kept" if self.kept_votes else "reset",
                 "decks": [{"remaining": len(s.deck.cards), "hand": len(s.hand.cards)} for s in self.seats],
                 "stats": [dict(st) for st in self.stats]}
 

@@ -228,6 +228,25 @@ def test_coop_shop():
     assert G.in_shop() and m.pack_seat is None and G.hand is m.seats[m.turn].hand
 
 
+def test_coop_shop_votes_and_packs():
+    """Rules 3: a player's ask to leave the shop holds while the other opens a pack; rules 2 dropped it."""
+    for rules, kept in ((3, True), (2, False)):
+        G = coop(rules)
+        m = G.mod("coop")
+        G.do({"cmd": "select_blind", "seat": 0})
+        G.do({"cmd": "cheat", "win": True, "dollars": 100, "seat": 0})
+        G.do({"cmd": "cash_out", "seat": 0})
+        G.do({"cmd": "end_shop", "seat": 1})
+        assert G.in_shop() and m.shop_votes == [1]
+        G.do({"cmd": "buy", "area": "shop_booster", "index": 0, "seat": 0})
+        assert G.in_pack()
+        G.do({"cmd": "skip_pack", "seat": 0})
+        assert G.in_shop() and m.shop_votes == ([1] if kept else [])
+        G.do({"cmd": "end_shop", "seat": 0})
+        assert G.in_shop() != kept  # (kept: both asked, the shop is left)
+        assert m.state()["votes"] == ("kept" if kept else "reset")
+
+
 def test_coop_stats():
     G = coop()
     m = G.mod("coop")
@@ -256,7 +275,9 @@ def test_coop_shared_set_up():
     with pytest.raises(ValueError):
         Game("TESTSEED", mods=[{"key": "coop", "decks": "three"}])
     with pytest.raises(ValueError):
-        Game("TESTSEED", mods=[{"key": "coop", "rules": 3}])
+        Game("TESTSEED", mods=[{"key": "coop", "rules": 4}])
+    with pytest.raises(ValueError):
+        Game("TESTSEED", mods=[{"key": "coop", "votes": "maybe"}])
     own = Game("TESTSEED", mods=[{"key": "coop", "decks": "own"}]).start_run().mod("coop")
     assert own.own_decks and own.steep_blinds
 
