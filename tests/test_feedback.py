@@ -39,6 +39,21 @@ def test_feedback_of_a_played_hand():
     assert all(sorted(e) == sorted(set(e)) for e in fb)
 
 
+def test_midas_mask_shows_the_gold_card_while_the_hand_is_scored():
+    """set_ability(..., delay_sprites): the game shows the new center in an event, before the card's juice."""
+    G = Game("TESTSEED").start_run()
+    G.do({"cmd": "add_joker", "key": "j_midas_mask"})
+    G.do({"cmd": "select_blind"})
+    king = next(c for c in G.hand.cards if c.config.card_key == "H_K")
+    fb = G.start_feedback()
+    G.do({"cmd": "play", "cards": [G.hand.cards.index(king)]})
+    G.stop_feedback()
+    about = [(e["type"], e.get("change")) for e in fb if e.get("card") == king.sort_id
+             and e["type"] in ("card_changed", "card_juiced")]
+    assert about[:2] == [("card_changed", "enhancement"), ("card_juiced", None)]
+    assert king.config.center.key == "m_gold"
+
+
 def test_preview_hand_matches_the_game_and_changes_nothing():
     rnd = random.Random(5)
     for seed in ("TESTSEED", "PREVIEW1", "PREVIEW2"):

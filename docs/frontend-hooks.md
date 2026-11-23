@@ -47,7 +47,7 @@ the run's game speed. `card` is the card's `sort_id`.
 | `card_flipped` | `card`, `facing` (`front`/`back`) | a card turns over (`Card:flip`) |
 | `card_removed` | `card`, `area` | a card leaves the game (`Card:remove`) |
 | `card_juiced` | `card`, `scale`, `rot` | a card wiggles (`Card:juice_up(scale, rot)`; `null`: its defaults): the joker behind a scored or held card's effect (`juice_card`, 0.7), the Uncommon Joker that Baseball Card multiplies (0.5, 0.5), a card Midas Mask turns Gold or Vampire drains (`null`, `null`) |
-| `card_changed` | `card`, `change` (`edition`, `seal`) | the card juices with its new edition's or seal's sound (`Card:set_edition`, `Card:set_seal`, unless silent) |
+| `card_changed` | `card`, `change` (`edition`, `seal`, `enhancement`) | the card juices with its new edition's or seal's sound (`Card:set_edition`, `Card:set_seal`, unless silent); `enhancement`: the card shows its new center, silently (`Card:set_ability`'s delayed sprites: Midas Mask, Vampire) |
 | `attention_text` | `card`, `key` | `attention_text` over a card; `k_nope_ex`: The Wheel of Fortune missed |
 | `card_unlocked` | `key`, `set` | `notify_alert`: a joker, voucher or deck unlocked (`unlock_card`, unseeded runs) |
 

@@ -133,7 +133,8 @@ class Card:
             G.unlock_card(center)
             G.discover_card(center)
         if delay_sprites:
-            G.ev(lambda: None)
+            # (the game's event that shows the new center: a hand being scored shows it then, Midas Mask's Gold)
+            G.ev(lambda: G._feedback("card_changed", card=self.sort_id, change="enhancement"))
         cfg = center.config
         old = self.ability
         self.ability = T(

@@ -31,9 +31,9 @@ one, so the oracle tests and golden vectors still hold. A mod keeps to the
 original wherever its mode allows (`tests/test_mods.py` checks it):
 
 - **PvP** is the original game until a round is lost.
-- **Coop**: the first player's deck deals as in the original game, and the
-  shop, bosses and tags keep the original's random streams (until what the
-  second player does changes them).
+- **Coop**: the deck deals as in the original game, and the shop, bosses and
+  tags keep the original's random streams (until what the second player does
+  changes them).
 
 ## Hooks
 
@@ -95,29 +95,43 @@ which the match decides.
 Two players play one run together, in turns (`balatro.mods.coop`).
 
 - **Shared**: the run (money, shop, vouchers, tags, consumables, hand
-  levels, blinds), a round's hands (as in the game) and discards (doubled),
-  and the jokers: 10 slots, 5 for each player (`limits`). Every joker counts;
-  a player buys, sells and moves only their own (a joker's `seat`).
-- **Each player's own**: their deck, with its hand and discard pile (the
-  `seats`' card areas; `G.hand`, `G.deck`, `G.discard` are the active seat's).
-  The second player's deck is shuffled on its own random streams (`..._2`).
-- **Turns** (`turn`): the player whose turn it is plays from their deck: play,
-  discard, sort, choose the blind, use consumables during the round. After
-  each hand they play, the turn passes and the other player's hand comes up
-  (their deck shuffled for the round and their hand drawn the first time). A
-  round starts with the player who didn't play the last hand.
+  levels, blinds), the deck and its hand, a round's hands (as in the game)
+  and discards (doubled), and the jokers: 10 slots, 5 for each player
+  (`limits`). Every joker counts; a player buys, sells and moves only their
+  own (a joker's `seat`).
+- **Turns** (`turn`): the player whose turn it is plays: play, discard, sort,
+  choose the blind, use consumables during the round. After each hand they
+  play, the turn passes and the other player goes on with the hand. A round
+  starts with the player who didn't play the last hand.
 - **The shop**: both players buy for themselves (a joker in their half, a
-  playing card in their deck, a pack they open: `pack_seat`). The shop is
-  left once both have sent `end_shop` (`shop_votes`).
-- **Blinds** grow faster: `1 + BLIND_GROWTH * (ante - 1)` times the game's
-  (0.35: ante 4 x2.05, ante 8 x3.45).
+  pack they open: `pack_seat`; while it is open its cards, the hand's cards
+  and the consumables are theirs to use). The shop is left once both have
+  sent `end_shop` (`shop_votes`).
+- **Blinds** grow faster: `max(1 + BLIND_GROWTH * (ante - 1),
+  exp(BLIND_STEEPNESS * (ante - 1)²))` times the game's (`blind_factor`:
+  ante 2 x1.35, ante 4 x2.46, ante 6 x12.2, ante 8 x134).
+
+**Rules** (option `rules`, default 2, `LATEST_RULES`): a run replays with the
+rules it started with, so keep the number with the run. Rules 1 (until engine
+0.9.0) are `decks="own"` and `blinds="linear"`; the two options can also be
+given on their own (`{"key": "coop", "decks": "own"}`):
+
+- `decks="own"`: each player has their own deck, with its hand and discard
+  pile (the `seats`' card areas; `G.hand`, `G.deck`, `G.discard` are the
+  active seat's), the second player's shuffled on its own random streams
+  (`..._2`). On their turn a player plays from their own hand (their deck
+  shuffled for the round and their hand drawn the first time); a playing card
+  bought goes in its buyer's deck, a pack deals its opener's hand.
+- `blinds="linear"`: `1 + BLIND_GROWTH * (ante - 1)` times the game's (0.35:
+  ante 4 x2.05, ante 8 x3.45).
 
 Every command carries its player's `seat` (0 or 1); one the rules don't
 allow raises `IllegalAction`. `legal_actions()` lists the `viewer` seat's.
 Feedback adds `{"type": "turn", "seat"}` when the turn passes and
 `{"type": "shop_vote", "seats"}` when a player asks to leave the shop.
 `state()` gives the turn, the joker slots, the shop votes, the pack's
-opener, each seat's deck and hand sizes, and each player's `stats` (hands
+opener, `decks_mode` (`"shared"` or `"own"`) and `blinds`, each seat's deck
+and hand sizes (`decks`: own decks only), and each player's `stats` (hands
 played, their chips, the best one and its name, discards).
 
 ## Content mods
