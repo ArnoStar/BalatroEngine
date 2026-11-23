@@ -132,8 +132,8 @@ def test_match_state():
 
 
 # ------------------------------------------------------------------ coop
-def coop() -> Game:
-    return Game("TESTSEED", mods=["coop"]).start_run()
+def coop(rules: int = 1) -> Game:
+    return Game("TESTSEED", mods=[{"key": "coop", "rules": rules}]).start_run()
 
 
 def test_coop_set_up():
@@ -243,3 +243,89 @@ def test_coop_stats():
     with pytest.raises(IllegalAction):
         G.do({"cmd": "play", "cards": [0], "seat": 1})  # (a refused command counts nothing)
     assert m.state()["stats"][1]["hands"] == 1
+
+
+# ------------------------------------------------------------------ coop, one deck (the default)
+def test_coop_shared_set_up():
+    G = Game("TESTSEED", mods=["coop"]).start_run()
+    m = G.mod("coop")
+    assert not m.own_decks and not m.seats and len(G.playing_cards) == 52
+    assert G.GAME.round_resets.discards == 8 and G.jokers.config.card_limit == 10 and m.limits == [5, 5]
+    assert m.state()["decks_mode"] == "shared" and m.state()["decks"] == []
+    assert [G.get_blind_amount(a) for a in (2, 4, 6, 8)] == [1000, 12000, 240000, 6700000]
+    with pytest.raises(ValueError):
+        Game("TESTSEED", mods=[{"key": "coop", "decks": "three"}])
+    with pytest.raises(ValueError):
+        Game("TESTSEED", mods=[{"key": "coop", "rules": 3}])
+    own = Game("TESTSEED", mods=[{"key": "coop", "decks": "own"}]).start_run().mod("coop")
+    assert own.own_decks and own.steep_blinds
+
+
+def test_coop_blind_factor():
+    from balatro.mods.coop import blind_factor
+    assert [round(blind_factor(a), 2) for a in range(1, 9)] == [1, 1.35, 1.7, 2.46, 4.95, 12.18, 36.6, 134.29]
+    assert blind_factor(1, steep=False) == 1 and blind_factor(8, steep=False) == pytest.approx(3.45)
+    assert blind_factor(500) == math.inf
+
+
+def test_coop_shared_deals_as_the_original_game():
+    G = coop(2)
+    G.do({"cmd": "select_blind", "seat": 0})
+    assert [c.config.card_key for c in G.hand.cards] == ["H_A", "H_K", "D_Q", "S_9", "C_9", "C_5", "D_5", "C_4"]
+
+
+def test_coop_shared_turns_go_on_with_the_hand():
+    G = coop(2)
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    hand, deck = G.hand, G.deck
+    G.do({"cmd": "discard", "cards": [0], "seat": 0})  # (a discard keeps the turn)
+    assert m.turn == 0
+    kept = [c.sort_id for c in G.hand.cards[5:]]
+    fb = G.start_feedback()
+    G.do({"cmd": "play", "cards": [0, 1, 2, 3, 4], "seat": 0})
+    G.stop_feedback()
+    assert m.turn == 1 and G.hand is hand and G.deck is deck and len(G.hand.cards) == 8
+    assert set(kept) <= {c.sort_id for c in G.hand.cards}  # (the same hand, drawn up again)
+    assert [e["seat"] for e in fb if e["type"] == "turn"] == [1]
+    assert len(G.deck.cards) == 52 - 8 - 1 - 5 and G.GAME.current_round.hands_left == 3
+    with pytest.raises(IllegalAction):
+        G.do({"cmd": "play", "cards": [0], "seat": 0})
+    G.do({"cmd": "play", "cards": [0], "seat": 1})
+    assert m.turn == 0 and m.state()["stats"][1]["hands"] == 1
+
+
+def test_coop_shared_round_end_and_next_starter():
+    G = coop(2)
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    G.do({"cmd": "play", "cards": [0], "seat": 0})
+    G.do({"cmd": "cheat", "win": True, "seat": 1})
+    assert G.STATE == G.STATES.ROUND_EVAL and len(G.deck.cards) == 52
+    G.do({"cmd": "cash_out", "seat": 0})
+    G.do({"cmd": "end_shop", "seat": 0})
+    G.do({"cmd": "end_shop", "seat": 1})
+    assert G.STATE == G.STATES.BLIND_SELECT and m.turn == 1
+    G.do({"cmd": "select_blind", "seat": 1})
+    assert len(G.hand.cards) == 8
+
+
+def test_coop_shared_pack_is_its_openers():
+    G = Game("S0002", mods=["coop"]).start_run()
+    m = G.mod("coop")
+    G.do({"cmd": "select_blind", "seat": 0})
+    G.do({"cmd": "cheat", "win": True, "dollars": 100, "seat": 0})
+    G.do({"cmd": "cash_out", "seat": 0})
+    assert m.turn == 0 and G.shop_booster.cards[1].config.center.key == "p_arcana_normal_2"
+    G.do({"cmd": "buy", "area": "shop_booster", "index": 1, "seat": 1})  # (not their turn: the shop is both's)
+    assert G.in_pack() and m.pack_seat == 1 and len(G.hand.cards) == 8  # (the Arcana pack deals the hand)
+    m.viewer = 1
+    assert any(a["cmd"] == "pick" for a in G.legal_actions())
+    m.viewer = 0
+    assert not any(a["cmd"] in ("pick", "skip_pack") for a in G.legal_actions())
+    m.viewer = None
+    with pytest.raises(IllegalAction):  # (the hand is the pack's opener's to arrange)
+        G.do({"cmd": "move", "area": "hand", "from": 0, "to": 1, "seat": 0})
+    G.do({"cmd": "move", "area": "hand", "from": 0, "to": 1, "seat": 1})
+    G.do({"cmd": "skip_pack", "seat": 1})
+    assert G.in_shop() and m.pack_seat is None

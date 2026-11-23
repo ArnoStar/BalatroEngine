@@ -110,7 +110,7 @@ them changes the run.
   | `card_flipped` | `card`, `facing` | a card turning over |
   | `card_removed` | `card`, `area` | a card leaving the game |
   | `card_juiced` | `card`, `scale`, `rot` | a card wiggling (`juice_up`'s arguments, `null` for its defaults): the joker that made a scored or held card's effect, the Uncommon Joker Baseball Card multiplies, a card Midas Mask or Vampire changes |
-  | `card_changed` | `card`, `change` (`edition`, `seal`) | a card shining with its new edition or seal (Aura, Hex, Déjà Vu...) |
+  | `card_changed` | `card`, `change` (`edition`, `seal`, `enhancement`) | a card shining with its new edition or seal (Aura, Hex, Déjà Vu...), or showing its new enhancement (Midas Mask, Vampire) |
   | `attention_text` | `card`, `key` (localization key: `k_nope_ex`) | a big text over a card (The Wheel of Fortune's "Nope!") |
   | `card_unlocked` | `key`, `set` | the "Unlocked!" notification (an unseeded run, `seeded=False`) |
 

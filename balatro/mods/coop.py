@@ -1,22 +1,34 @@
 """Coop: two players play one run together, in turns.
 
 - **Shared**: the run (money, shop, vouchers, tags, consumables, hand levels,
-  the blinds), the hands and the discards of a round (the hands as in the
-  game, the discards doubled), and the jokers: 10 slots, 5 for each player.
-  Every joker counts, whoever's it is; a player buys, sells and moves only
-  their own (``owner``).
-- **Each player's own**: their deck (with its hand and discard pile, the
-  seats' card areas). The second player's deck is shuffled on its own random
-  stream: the first player's deck goes as in the original game.
-- **Turns**: the player whose turn it is plays from their deck (play, discard,
-  sort, the blind's choice, consumables during the round); after each hand
-  they play, the turn passes to the other player, whose own hand comes up
-  (drawn the first time in the round). A round starts with the player who
-  didn't play last.
-- **The shop**: both buy (for themselves: a joker goes in their half, a
-  playing card in their deck, a pack is theirs to open); the shop is left once
-  both players have asked to leave it.
-- **The blinds** grow faster: ``(1 + BLIND_GROWTH * (ante - 1))`` times the game's.
+  the blinds), the deck and its hand, the hands and the discards of a round
+  (the hands as in the game, the discards doubled), and the jokers: 10 slots,
+  5 for each player. Every joker counts, whoever's it is; a player buys,
+  sells and moves only their own (``owner``).
+- **Turns**: the player whose turn it is plays (play, discard, sort, the
+  blind's choice, consumables during the round); after each hand they play,
+  the turn passes to the other player, who goes on with the hand. A round
+  starts with the player who didn't play last.
+- **The shop**: both buy (for themselves: a joker goes in their half, a pack
+  is theirs to open: they choose its cards, and the hand's cards it is used
+  on); the shop is left once both players have asked to leave it.
+- **Rules** (option ``rules``): ``2`` (the default) is the above; ``1``, the
+  rules until engine 0.9.0, is ``decks="own"`` and ``blinds="linear"`` (a run
+  replays with the rules it was started with). ``decks`` and ``blinds`` can
+  also be given on their own.
+- **Decks** (option ``decks``): ``"shared"`` (rules 2) is the above;
+  ``"own"``, the rules until engine 0.9.0 (runs started with them replay with
+  them): each player has their own deck, with its hand and discard pile (the
+  seats' card areas), and the second player's deck is shuffled on its own
+  random stream (the first player's deck goes as in the original game). On
+  their turn a player plays from their own hand, drawn the first time in the
+  round; a playing card bought goes in its buyer's deck, a pack deals its
+  opener's hand.
+- **The blinds** grow faster (two players' jokers make far bigger hands):
+  ``max(1 + BLIND_GROWTH * (ante - 1), exp(BLIND_STEEPNESS * (ante - 1)²))``
+  times the game's: x1.35 at ante 2, x2.46 at ante 4, x12.2 at ante 6, x134 at
+  ante 8 (option ``blinds``: ``"steep"``; ``"linear"``, until engine 0.9.0:
+  ``1 + BLIND_GROWTH * (ante - 1)``, x3.45 at ante 8).
 - **Each player's numbers** (``stats``): the hands they played and their
   chips, their best hand, their discards (for the players to compare).
 
@@ -40,7 +52,12 @@ if TYPE_CHECKING:
 
 SEATS = 2
 BLIND_GROWTH = 0.35
+BLIND_STEEPNESS = 0.1
 TURN_COMMANDS = ("play", "discard", "sort", "select_blind", "skip_blind", "reroll_boss")
+DECKS = ("shared", "own")
+BLINDS = ("steep", "linear")
+RULES = {1: {"decks": "own", "blinds": "linear"}, 2: {"decks": "shared", "blinds": "steep"}}
+LATEST_RULES = 2
 
 
 class Seat:
@@ -58,7 +75,18 @@ class Coop(Mod):
 
     def __init__(self, **options: Any) -> None:
         super().__init__(**options)
-        self.seats: list[Seat] = []
+        rules = options.get("rules", LATEST_RULES)
+        if rules not in RULES:
+            raise ValueError(f"coop's rules are one of {', '.join(map(str, RULES))}")
+        decks = options.get("decks", RULES[rules]["decks"])
+        blinds = options.get("blinds", RULES[rules]["blinds"])
+        if decks not in DECKS:
+            raise ValueError(f"coop's decks are one of {', '.join(DECKS)}")
+        if blinds not in BLINDS:
+            raise ValueError(f"coop's blinds are one of {', '.join(BLINDS)}")
+        self.own_decks = decks == "own"  # each player's own deck (rules 1)
+        self.steep_blinds = blinds == "steep"
+        self.seats: list[Seat] = []  # (own decks: each player's card areas)
         self.turn = 0  # whose turn it is
         self.active = 0  # whose card areas are the game's (G.hand, G.deck, G.discard)
         self.limits = [0, 0]  # each player's joker slots
@@ -76,6 +104,10 @@ class Coop(Mod):
 
     def start(self, G: "Game") -> None:
         sp = G.GAME.starting_params
+        self.limits = [sp.joker_slots, sp.joker_slots]
+        G.jokers.config.card_limit = sp.joker_slots * SEATS
+        if not self.own_decks:
+            return
         first = Seat(G.deck, G.hand, G.discard)
         second = Seat(CardArea(G, "deck", {"card_limit": 52, "type": "deck"}),
                       CardArea(G, "hand", {"card_limit": sp.hand_size, "type": "hand"}),
@@ -86,8 +118,6 @@ class Coop(Mod):
             G.card_from_control(p)
         G.deck = first.deck
         self.seats = [first, second]
-        self.limits = [sp.joker_slots, sp.joker_slots]
-        G.jokers.config.card_limit = sp.joker_slots * SEATS
 
     # ------------------------------------------------------------ seats
     def use(self, G: "Game", seat: int) -> None:
@@ -148,7 +178,7 @@ class Coop(Mod):
     def blind_amount(self, G: "Game", ante: int, amount: float) -> float:
         if amount is None or ante < 1:
             return amount
-        x = amount * (1 + BLIND_GROWTH * (ante - 1))
+        x = amount * blind_factor(ante, self.steep_blinds)
         if x != x or x == math.inf or x < 1000:
             return x
         step = 10 ** (math.floor(math.log10(x)) - 1)
@@ -165,6 +195,10 @@ class Coop(Mod):
         if len(self.seats) == SEATS and area is self.seats[1].deck:
             return key + "_2"
         return key
+
+    def hand_seat(self, G: "Game") -> int:
+        """Whose the hand is to select: the pack's opener's while it is open, else the turn's player's."""
+        return self.pack_seat if G.in_pack() and self.pack_seat is not None else self.turn
 
     # ------------------------------------------------------------ commands
     def check(self, G: "Game", seat: int, cmd: dict) -> None:
@@ -183,8 +217,10 @@ class Coop(Mod):
             for i in idx:
                 if not isinstance(i, int) or not 0 <= i < len(a) or self.owner(a[i]) != seat:
                     raise IllegalAction("that joker is the other player's")
-        if c == "move" and cmd.get("area") == "hand" and seat != self.turn:
+        if c == "move" and cmd.get("area") == "hand" and seat != (self.turn if self.own_decks else self.hand_seat(G)):
             raise IllegalAction("it is the other player's turn")
+        if c == "use" and not self.own_decks and G.in_pack() and seat != self.pack_seat:
+            raise IllegalAction("the other player opened this pack")
         if c == "buy" and cmd.get("area") == "shop_jokers" and G.shop_jokers is not None:
             i = cmd.get("index")
             if isinstance(i, int) and 0 <= i < len(G.shop_jokers.cards):
@@ -224,11 +260,29 @@ class Coop(Mod):
         c = cmd.get("cmd")
         seat = self._acting
         self.own_jokers(G, seat)
-        if c == "select_blind":
-            self.seats[self.active].round_seen = G.GAME.round
         self.count(G, seat, c)
         if c == "play":
             self.turn = 1 - seat  # (after each hand: a round starts with the player who didn't play last)
+        if self.own_decks:
+            self.own_decks_after(G, c)
+        elif c == "play" and G.STATE == S.SELECTING_HAND:
+            G._feedback("turn", seat=self.turn)  # (the other player goes on with the hand)
+        # a pack is its opener's until it closes
+        if G.in_pack():
+            if self.pack_seat is None:
+                self.pack_seat = self.active if self.own_decks else seat
+        else:
+            self.pack_seat = None
+            if G.STATE in (S.SHOP, S.BLIND_SELECT, S.ROUND_EVAL) and self.active != self.turn:
+                self.use(G, self.turn)  # (own decks: the turn's areas again)
+        if not G.in_shop():
+            self.shop_votes = []
+
+    def own_decks_after(self, G: "Game", c: str | None) -> None:
+        """Own decks: the turn's player's hand up, and the hands left over at a round's end back in their decks."""
+        S = G.STATES
+        if c == "select_blind":
+            self.seats[self.active].round_seen = G.GAME.round
         if G.STATE == S.SELECTING_HAND and self.active != self.turn:
             self.bring_up(G, self.turn)
         elif G.STATE in (S.ROUND_EVAL, S.GAME_OVER) and self.seats:
@@ -240,16 +294,6 @@ class Coop(Mod):
             if self.active != self.turn:
                 self.use(G, self.turn)
                 G._feedback("turn", seat=self.turn)
-        # a pack is its opener's until it closes; then the turn's areas again
-        if G.in_pack():
-            if self.pack_seat is None:
-                self.pack_seat = self.active
-        else:
-            self.pack_seat = None
-            if G.STATE in (S.SHOP, S.BLIND_SELECT, S.ROUND_EVAL) and self.active != self.turn:
-                self.use(G, self.turn)
-        if not G.in_shop():
-            self.shop_votes = []
 
     def count(self, G: "Game", seat: int, c: str | None) -> None:
         """The player's numbers after their command (a hand played: its score, from the scoring)."""
@@ -282,7 +326,8 @@ class Coop(Mod):
 
     def state(self) -> dict[str, Any]:
         return {"turn": self.turn, "limits": list(self.limits), "shop_votes": list(self.shop_votes),
-                "pack_seat": self.pack_seat,
+                "pack_seat": self.pack_seat, "decks_mode": "own" if self.own_decks else "shared",
+                "blinds": "steep" if self.steep_blinds else "linear",
                 "decks": [{"remaining": len(s.deck.cards), "hand": len(s.hand.cards)} for s in self.seats],
                 "stats": [dict(st) for st in self.stats]}
 
@@ -290,6 +335,17 @@ class Coop(Mod):
         """The seat's playing cards in its deck, hand and discard pile."""
         s = self.seats[seat]
         return [*s.deck.cards, *s.hand.cards, *s.discard.cards]
+
+
+def blind_factor(ante: int, steep: bool = True) -> float:
+    """How many times the game's chips a blind of this ante asks for."""
+    linear = 1 + BLIND_GROWTH * (ante - 1)
+    if not steep:
+        return linear
+    try:
+        return max(linear, math.exp(BLIND_STEEPNESS * (ante - 1) ** 2))
+    except OverflowError:
+        return math.inf
 
 
 def new_stats() -> dict[str, Any]:
@@ -300,4 +356,5 @@ def owner_of(card: Any) -> int | None:
     return getattr(card, "seat", None)
 
 
-__all__ = ["BLIND_GROWTH", "Coop", "SEATS", "owner_of"]
+__all__ = ["BLINDS", "BLIND_GROWTH", "BLIND_STEEPNESS", "Coop", "DECKS", "LATEST_RULES", "RULES", "SEATS",
+           "blind_factor", "owner_of"]

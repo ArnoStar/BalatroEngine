@@ -5,8 +5,8 @@ code.  Every hook does nothing by default, and a game without mods never calls
 one, so a run without mods is exactly the original game (same seed, same
 choices, same run).  A mod keeps to the original wherever its mode allows:
 the PvP mode is the original game until a round is lost, and in the coop mode
-the first player's deck, the shop, the bosses and the tags keep the original's
-random streams (what the second player does can still change them).
+the deck, the shop, the bosses and the tags keep the original's random streams
+(what the two players do can still change them).
 
     G = Game("SEED", mods=["pvp"]).start_run()
     G = Game("SEED", mods=[{"key": "pvp"}]).start_run()
