@@ -106,16 +106,20 @@ Two players play one run together, in turns (`balatro.mods.coop`).
 - **The shop**: both players buy for themselves (a joker in their half, a
   pack they open: `pack_seat`; while it is open its cards, the hand's cards
   and the consumables are theirs to use). The shop is left once both have
-  sent `end_shop` (`shop_votes`).
+  sent `end_shop` (`shop_votes`); a player's ask holds while the other opens
+  a pack.
 - **Blinds** grow faster: `max(1 + BLIND_GROWTH * (ante - 1),
   exp(BLIND_STEEPNESS * (ante - 1)²))` times the game's (`blind_factor`:
   ante 2 x1.35, ante 4 x2.46, ante 6 x12.2, ante 8 x134).
 
-**Rules** (option `rules`, default 2, `LATEST_RULES`): a run replays with the
-rules it started with, so keep the number with the run. Rules 1 (until engine
-0.9.0) are `decks="own"` and `blinds="linear"`; the two options can also be
-given on their own (`{"key": "coop", "decks": "own"}`):
+**Rules** (option `rules`, default 3, `LATEST_RULES`): a run replays with the
+rules it started with, so keep the number with the run. Rules 2 (engine
+0.9.0) are `votes="reset"`; rules 1 (until engine 0.9.0) are also
+`decks="own"` and `blinds="linear"`; the options can also be given on their
+own (`{"key": "coop", "decks": "own"}`):
 
+- `votes="reset"`: a pack opened in the shop drops the asks to leave it (a
+  player who had asked must ask again).
 - `decks="own"`: each player has their own deck, with its hand and discard
   pile (the `seats`' card areas; `G.hand`, `G.deck`, `G.discard` are the
   active seat's), the second player's shuffled on its own random streams
